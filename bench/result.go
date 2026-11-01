@@ -48,22 +48,46 @@ type CellResult struct {
 	Steps         []CellResult            `json:"steps,omitempty"`
 	SaturationRPS *int                    `json:"saturation_rps,omitempty"`
 	LadderStop    string                  `json:"ladder_stop,omitempty"`
+	LadderFor     string                  `json:"ladder_for,omitempty"`
 }
 
 // Report is the file bench/results/.../summary.json.
 type Report struct {
-	StartedAt     time.Time    `json:"started_at"`
-	FinishedAt    time.Time    `json:"finished_at"`
-	Version       string       `json:"version"`
-	Commit        string       `json:"commit"`
-	Binary        string       `json:"binary"`
-	Quick         bool         `json:"quick"`
-	RequestBytes  int          `json:"request_bytes"`
-	ResponseBytes int          `json:"response_bytes"`
-	Environment   Environment  `json:"environment"`
-	SelfTest      RunMetrics   `json:"self_test"`
-	Cells         []CellResult `json:"cells"`
-	Notes         []string     `json:"notes"`
+	StartedAt     time.Time       `json:"started_at"`
+	FinishedAt    time.Time       `json:"finished_at"`
+	Version       string          `json:"version"`
+	Commit        string          `json:"commit"`
+	Binary        string          `json:"binary"`
+	Quick         bool            `json:"quick"`
+	RequestBytes  int             `json:"request_bytes"`
+	ResponseBytes int             `json:"response_bytes"`
+	Environment   Environment     `json:"environment"`
+	SelfTest      RunMetrics      `json:"self_test"`
+	Cells         []CellResult    `json:"cells"`
+	Targets       []TargetInfo    `json:"targets,omitempty"`
+	NotRun        []NotRun        `json:"not_run,omitempty"`
+	Failures      []TargetFailure `json:"failures,omitempty"`
+	Notes         []string        `json:"notes"`
+}
+
+// TargetInfo is one gateway the harness actually started.
+type TargetInfo struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+	Detail  string `json:"detail,omitempty"`
+}
+
+// NotRun is a gateway that was not measured, with the reason.
+type NotRun struct {
+	Name   string `json:"name"`
+	Reason string `json:"reason"`
+}
+
+// TargetFailure is a start or sanity error for one target in one cell.
+type TargetFailure struct {
+	Cell   string `json:"cell"`
+	Target string `json:"target"`
+	Error  string `json:"error"`
 }
 
 // Environment is the machine the harness measured, not a claimed reference lab.

@@ -17,6 +17,7 @@ apps/desktop/data
 /bin
 coverage.out
 bench/bin/
+bench/.cache/
 
 # npm package build output
 packages/cli/vendor/

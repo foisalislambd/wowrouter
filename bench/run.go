@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -25,6 +26,10 @@ type benchHarness struct {
 	bin           string
 	mock          *childProc
 	clk           float64
+	cache         string
+	version       string
+	order         []string
+	failures      []TargetFailure
 	gatewayBody   []byte
 	directBody    []byte
 	streamGateway []byte
@@ -60,9 +65,9 @@ func (h *benchHarness) selfTest(quick bool) (RunMetrics, error) {
 	if quick {
 		rate, warmup, measure = 300, 0, 1
 	}
-	metrics := runLoad(h.spec(cellPlan{
-		kind: "open", rate: rate, warmup: warmup, measure: measure, expect: 200,
-	}, h.mockURL(), upstreamKey, true))
+	metrics := runLoad(h.loadSpec(cellPlan{
+		kind: "open", rate: rate, warmup: warmup, measure: measure,
+	}, h.mockURL(), upstreamKey, upstreamModel, 200, false, nil))
 	logf("self-test direct p50=%s p99=%s success=%.2f%% (%d/%d)",
 		fmtUS(metrics.LatencyP50Us), fmtUS(metrics.LatencyP99Us), metrics.SuccessFraction*100, metrics.Success, metrics.Offered)
 	if metrics.Offered == 0 || float64(metrics.Success) < 0.99*float64(metrics.Offered) {
@@ -75,6 +80,10 @@ func (h *benchHarness) runAll(quick bool, only map[string]bool) ([]CellResult, e
 	var cells []CellResult
 	for _, plan := range fullPlans(quick) {
 		if !want(only, plan.id) {
+			continue
+		}
+		plan.targets = h.namesFor(plan)
+		if len(plan.targets) == 0 {
 			continue
 		}
 		logf("cell %s — %s", plan.id, plan.title)
@@ -102,6 +111,41 @@ func want(only map[string]bool, id string) bool {
 	return only[id]
 }
 
+func (h *benchHarness) namesFor(plan cellPlan) []string {
+	cat := h.catalog()
+	var out []string
+	for _, name := range h.order {
+		spec, ok := cat[name]
+		if !ok {
+			continue
+		}
+		if plan.id == "reject-key" && spec.RejectKeyStatus == 0 {
+			continue
+		}
+		if plan.id == "reject-model" && spec.RejectModelStatus == 0 {
+			continue
+		}
+		out = append(out, name)
+	}
+	return out
+}
+
+func (h *benchHarness) noteFailure(cell, target string, err error) {
+	text := err.Error()
+	if i := strings.Index(text, "ak-wowrouter-"); i >= 0 {
+		end := i + len("ak-wowrouter-")
+		for end < len(text) && text[end] != ' ' && text[end] != '\n' {
+			end++
+		}
+		text = text[:i] + "[redacted]" + text[end:]
+	}
+	if len(text) > 700 {
+		text = text[:700]
+	}
+	h.failures = append(h.failures, TargetFailure{Cell: cell, Target: target, Error: text})
+	logf("%s %s failed: %s", cell, target, text)
+}
+
 func (h *benchHarness) runCell(plan cellPlan) (CellResult, error) {
 	cell := plan.resultShell()
 	grouped := map[string][]RepResult{}
@@ -109,7 +153,8 @@ func (h *benchHarness) runCell(plan cellPlan) (CellResult, error) {
 		for _, target := range plan.targets {
 			result, err := h.oneRep(plan, target)
 			if err != nil {
-				return cell, fmt.Errorf("rep %d %s: %w", rep, target, err)
+				h.noteFailure(plan.id, target, err)
+				continue
 			}
 			grouped[target] = append(grouped[target], result)
 			logRep(plan, rep, target, result)
@@ -127,34 +172,43 @@ func (h *benchHarness) runLadder() (CellResult, error) {
 		ID: "ladder", Title: "Open-loop saturation, simple chat", Kind: "ladder",
 		Expect: 200, WarmupSec: 1, MeasureSec: 3, Reps: 1,
 	}
-	var lastPass *int
-	for _, rate := range ladderRates() {
-		plan := cellPlan{
-			id: fmt.Sprintf("ladder-%d", rate), title: fmt.Sprintf("Ladder %d rps", rate),
-			kind: "open", rate: rate, warmup: 1, measure: 3, reps: 1, expect: 200,
-			direct: true, targets: []string{"wowrouter"},
+	for _, name := range h.namesFor(cellPlan{id: "h1"}) {
+		group := CellResult{
+			ID: "ladder-" + name, LadderFor: name, Kind: "ladder",
+			Expect: 200, WarmupSec: 1, MeasureSec: 3, Reps: 1,
 		}
-		logf("ladder step %d rps", rate)
-		step, err := h.runCell(plan)
-		if err != nil {
-			return cell, err
+		var lastPass *int
+		for _, rate := range ladderRates() {
+			plan := cellPlan{
+				id: fmt.Sprintf("ladder-%s-%d", name, rate), title: fmt.Sprintf("Ladder %s %d rps", name, rate),
+				kind: "open", rate: rate, warmup: 1, measure: 3, reps: 1, expect: 200,
+				direct: true, targets: []string{name},
+			}
+			logf("ladder %s step %d rps", name, rate)
+			step, err := h.runCell(plan)
+			if err != nil {
+				return cell, err
+			}
+			group.Steps = append(group.Steps, step)
+			got, ok := step.Targets[name]
+			if !ok {
+				group.LadderStop = fmt.Sprintf("%d rps: the target did not complete a repetition", rate)
+				break
+			}
+			reason := ladderFailure(got.Median)
+			if reason != "" {
+				group.LadderStop = fmt.Sprintf("%d rps: %s", rate, reason)
+				logf("ladder %s stop: %s", name, group.LadderStop)
+				break
+			}
+			passed := rate
+			lastPass = &passed
 		}
-		cell.Steps = append(cell.Steps, step)
-		median := step.Targets["wowrouter"].Median
-		reason := ladderFailure(median)
-		if reason != "" {
-			cell.LadderStop = fmt.Sprintf("%d rps: %s", rate, reason)
-			logf("ladder stop: %s", cell.LadderStop)
-			break
+		group.SaturationRPS = lastPass
+		if group.LadderStop == "" {
+			group.LadderStop = fmt.Sprintf("every step through %d rps passed; the ladder does not go higher", ladderRates()[len(ladderRates())-1])
 		}
-		passed := rate
-		lastPass = &passed
-	}
-	if lastPass != nil {
-		cell.SaturationRPS = lastPass
-	}
-	if cell.LadderStop == "" {
-		cell.LadderStop = fmt.Sprintf("every step through %d rps passed; the ladder does not go higher", ladderRates()[len(ladderRates())-1])
+		cell.Steps = append(cell.Steps, group)
 	}
 	return cell, nil
 }
@@ -180,65 +234,50 @@ func ladderFailure(rep RepResult) string {
 
 func (h *benchHarness) oneRep(plan cellPlan, target string) (RepResult, error) {
 	var rep RepResult
-	var proc *childProc
-	var auth string
-	var err error
-	dataDir := ""
 	started := time.Now()
-	switch target {
-	case "wowrouter":
-		dataDir, err = os.MkdirTemp("", "wowrouter-bench-")
-		if err != nil {
-			return rep, err
-		}
-		defer os.RemoveAll(dataDir)
-		proc, _, err = startGateway(h.bin, dataDir)
-		if err != nil {
-			return rep, err
-		}
-		secret, cfgErr := configureGateway("http://" + mockAddr)
-		if cfgErr != nil {
-			proc.stop()
-			return rep, fmt.Errorf("%w\n%s", cfgErr, proc.tail.String())
-		}
-		auth = secret
-	case "proxy":
-		proc, err = startRole("proxy", proxyAddr, "http://"+mockAddr)
-		if err != nil {
-			return rep, err
-		}
-		auth = "proxy-unused"
-	default:
-		return rep, fmt.Errorf("unknown target %s", target)
+	live, err := h.launch(target)
+	if err != nil {
+		return rep, err
 	}
-	defer proc.stop()
+	defer func() {
+		live.proc.stop()
+		live.proc.closeCleanup()
+	}()
 	rep.ReadyMs = time.Since(started).Milliseconds()
 	time.Sleep(200 * time.Millisecond)
-	rep.IdleRSSBytes = sampleIdleRSS(proc.pid())
+	rep.IdleRSSBytes = sampleIdleRSS(live.proc.pid())
 
 	if plan.kind == "idle" {
 		rep.PeakRSSBytes = rep.IdleRSSBytes
-		proc.stop()
-		time.Sleep(50 * time.Millisecond)
 		return rep, nil
 	}
 
-	url := "http://" + gatewayAddr + "/v1/chat/completions"
-	if target == "proxy" {
-		url = "http://" + proxyAddr + "/v1/chat/completions"
+	auth := live.auth
+	model := live.spec.Model
+	expect := plan.expect
+	stream := plan.stream
+	switch {
+	case plan.id == "reject-key":
+		auth = live.spec.RejectKey
+		expect = live.spec.RejectKeyStatus
+		stream = false
+	case plan.id == "reject-model":
+		model = live.spec.RejectModel
+		expect = live.spec.RejectModelStatus
+		stream = false
 	}
-	if err := h.sanity(plan, url, auth); err != nil {
-		return rep, fmt.Errorf("%w\n%s", err, proc.tail.String())
+	if err := h.sanity(live.url, auth, model, expect, stream, live.extra); err != nil {
+		return rep, fmt.Errorf("%w\n%s", err, live.proc.tail.String())
 	}
 
 	stopPeak := make(chan struct{})
 	peakCh := make(chan int64, 1)
-	go func() { peakCh <- watchPeakRSS(proc.pid(), stopPeak) }()
+	go func() { peakCh <- watchPeakRSS(live.proc.pid(), stopPeak) }()
 
-	gwCPU := cpuWindow{pid: proc.pid(), clk: h.clk}
+	gwCPU := cpuWindow{pid: live.proc.pid(), clk: h.clk}
 	mockCPU := cpuWindow{pid: h.mock.pid(), clk: h.clk}
 	genCPU := cpuWindow{pid: os.Getpid(), clk: h.clk}
-	spec := h.spec(plan, url, auth, false)
+	spec := h.loadSpec(plan, live.url, auth, model, expect, stream, live.extra)
 	spec.OnMeasureStart = func() {
 		gwCPU.begin()
 		mockCPU.begin()
@@ -258,11 +297,11 @@ func (h *benchHarness) oneRep(plan cellPlan, target string) (RepResult, error) {
 	_, rep.GeneratorCPUPercent = genCPU.end(metrics.Completed)
 	rep.Run = metrics
 
-	proc.stop()
+	live.proc.stop()
 	time.Sleep(50 * time.Millisecond)
 
 	if plan.direct {
-		direct := runLoad(h.spec(plan, h.mockURL(), upstreamKey, true))
+		direct := runLoad(h.loadSpec(plan, h.mockURL(), upstreamKey, upstreamModel, 200, stream, nil))
 		rep.Direct = &direct
 		rep.DirectRan = true
 		rep.DirectClean = directClean(direct.Success, direct.Offered, direct.latencyP99())
@@ -271,7 +310,7 @@ func (h *benchHarness) oneRep(plan cellPlan, target string) (RepResult, error) {
 			rep.OverheadP50Us = metrics.LatencyP50Us - direct.LatencyP50Us
 			rep.OverheadP99Us = metrics.LatencyP99Us - direct.LatencyP99Us
 			rep.OverheadP999Us = metrics.LatencyP999Us - direct.LatencyP999Us
-			if plan.stream {
+			if stream {
 				rep.TTFTOverheadP50Us = metrics.TTFTP50Us - direct.TTFTP50Us
 				rep.TTFTOverheadP99Us = metrics.TTFTP99Us - direct.TTFTP99Us
 			}
@@ -280,58 +319,30 @@ func (h *benchHarness) oneRep(plan cellPlan, target string) (RepResult, error) {
 	return rep, nil
 }
 
-func (h *benchHarness) sanity(plan cellPlan, url, auth string) error {
-	probe := plan
-	probe.kind = "open"
-	probe.rate = 1
-	probe.warmup = 0
-	probe.measure = 1
-	probe.conc = 0
-	metrics := runLoad(h.spec(probe, url, auth, false))
+func (h *benchHarness) sanity(url, auth, model string, expect int, stream bool, extra map[string]string) error {
+	probe := cellPlan{kind: "open", rate: 1, measure: 1}
+	metrics := runLoad(h.loadSpec(probe, url, auth, model, expect, stream, extra))
 	if metrics.Success != 1 {
 		return fmt.Errorf("sanity check expected one %d and got success=%d errors=%v statuses=%v",
-			plan.expect, metrics.Success, metrics.ErrorsByClass, metrics.Statuses)
+			expect, metrics.Success, metrics.ErrorsByClass, metrics.Statuses)
 	}
 	return nil
 }
 
-func (h *benchHarness) spec(plan cellPlan, url, auth string, direct bool) LoadSpec {
-	body := h.gatewayBody
-	switch {
-	case plan.id == "reject-model" || (len(plan.id) > 12 && plan.id == "reject-model"):
-		body = chatBody("openai/bench-unknown", false)
-	case plan.stream && direct:
-		body = h.streamDirect
-	case plan.stream:
-		body = h.streamGateway
-	case direct:
-		body = h.directBody
-	}
-	if stringsHasPrefix(plan.id, "ladder-") && direct {
-		body = h.directBody
-	}
-	if plan.id == "reject-key" {
-		auth = "sk-airoute-bench-unknown"
-		if direct {
-			auth = upstreamKey
-		}
-	}
+func (h *benchHarness) loadSpec(plan cellPlan, url, auth, model string, expect int, stream bool, extra map[string]string) LoadSpec {
 	return LoadSpec{
 		URL:         url,
-		Body:        body,
+		Body:        chatBody(model, stream),
 		Auth:        auth,
+		Extra:       extra,
 		Rate:        plan.rate,
 		Concurrency: plan.conc,
 		Warmup:      time.Duration(plan.warmup) * time.Second,
 		Measure:     time.Duration(plan.measure) * time.Second,
 		Timeout:     defaultTimeout,
-		Stream:      plan.stream,
-		Expect:      plan.expect,
+		Stream:      stream,
+		Expect:      expect,
 	}
-}
-
-func stringsHasPrefix(value, prefix string) bool {
-	return len(value) >= len(prefix) && value[:len(prefix)] == prefix
 }
 
 func (h *benchHarness) mockURL() string {
