@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"wowrouter/server/internal/combo"
 	"wowrouter/server/internal/gateway"
 )
 
@@ -36,6 +37,12 @@ func (s *Server) gatewayModels(w http.ResponseWriter, r *http.Request) {
 		data = append(data, map[string]any{
 			"id": provider + "/" + upstream, "object": "model", "owned_by": provider,
 		})
+	}
+	for _, name := range combo.AutoModels() {
+		data = append(data, map[string]any{"id": name, "object": "model", "owned_by": "wowrouter"})
+	}
+	for _, item := range s.Admin.Store.Resources("combos") {
+		data = append(data, map[string]any{"id": "combo:" + item.Name, "object": "model", "owned_by": "wowrouter"})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
 }

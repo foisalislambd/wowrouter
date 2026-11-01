@@ -140,6 +140,14 @@ export const NAV: NavSection[] = [
         gatewayWide: true,
       },
       {
+        id: 'combos',
+        label: 'Combos',
+        href: '/combos/',
+        icon: 'route',
+        permission: 'models:read',
+        gatewayWide: true,
+      },
+      {
         id: 'playground',
         label: 'Playground',
         href: '/playground/',

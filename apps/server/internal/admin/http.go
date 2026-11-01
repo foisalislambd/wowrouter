@@ -200,6 +200,19 @@ func (a *API) route(w http.ResponseWriter, r *http.Request, path string) {
 		a.guardTest(w, r, "")
 	case path == "providers:test" && r.Method == http.MethodPost:
 		a.providerTest(w, r, "")
+	case path == "provider-presets" && r.Method == http.MethodGet:
+		a.providerPresets(w, r)
+	case strings.HasPrefix(path, "provider-presets/") && strings.HasSuffix(path, ":install") && r.Method == http.MethodPost:
+		id := strings.TrimSuffix(strings.TrimPrefix(path, "provider-presets/"), ":install")
+		a.installPreset(w, id)
+	case path == "routing/strategies" && r.Method == http.MethodGet:
+		a.routingStrategies(w)
+	case path == "runtime/quotas" && r.Method == http.MethodGet:
+		a.runtimeQuotas(w)
+	case path == "clients" && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]any{"items": clientsList()})
+	case strings.HasPrefix(path, "clients/") && r.Method == http.MethodGet:
+		a.clientSnippet(w, strings.TrimPrefix(path, "clients/"))
 	case strings.HasPrefix(path, "settings/"):
 		a.settings(w, r, strings.TrimPrefix(path, "settings/"))
 	default:
@@ -243,6 +256,7 @@ func splitCollection(path string) (col, name string, ok bool) {
 		"cache/invalidation_rules", "alerts/channels", "alerts/rules", "mcp/servers", "mcp/gateways",
 		"a2a/agents", "logs/views", "change_requests", "role_bindings", "providers", "models", "deployments",
 		"routes", "keys", "organizations", "teams", "projects", "users", "guardrails", "plugins", "invitations",
+		"combos", "memories",
 	}
 	for _, c := range cols {
 		if path == c {
