@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -24,10 +25,11 @@ const (
 )
 
 type childProc struct {
-	cmd    *exec.Cmd
-	tail   *tailBuf
-	exited chan struct{}
-	once   sync.Once
+	cmd     *exec.Cmd
+	tail    *tailBuf
+	exited  chan struct{}
+	once    sync.Once
+	cleanup func()
 }
 
 func (p *childProc) pid() int {
@@ -151,6 +153,12 @@ func waitHealthy(url string, timeout time.Duration, proc *childProc) error {
 			_, _ = io.Copy(io.Discard, resp.Body)
 			resp.Body.Close()
 			if resp.StatusCode == http.StatusOK {
+				// A process that failed to bind can look healthy for one
+				// probe when an older server is still on the port.
+				time.Sleep(50 * time.Millisecond)
+				if proc.finished() {
+					return fmt.Errorf("process exited before %s was healthy", url)
+				}
 				return nil
 			}
 			last = fmt.Errorf("status %s", resp.Status)
@@ -190,7 +198,65 @@ func configureGateway(mockBase string) (string, error) {
 	return created.Secret, nil
 }
 
+// configureVirtual saves one provider, one deployment, and the virtual model
+// "chat", with the response cache off. The gateway still writes its request log.
+func configureVirtual(dataDir, mockBase string) (string, error) {
+	tokenRaw, err := os.ReadFile(filepath.Join(dataDir, "bootstrap-token"))
+	if err != nil {
+		return "", fmt.Errorf("bootstrap token: %w", err)
+	}
+	token := strings.TrimSpace(string(tokenRaw))
+	if token == "" {
+		return "", fmt.Errorf("bootstrap token is empty")
+	}
+	base := "http://" + gatewayAddr + "/admin/v1"
+	put := func(path string, spec map[string]any) error {
+		return apiJSONAuth(http.MethodPut, base+path, token, map[string]any{"spec": spec}, nil)
+	}
+	if err := put("/providers/openai", map[string]any{
+		"type":     "openai_compatible",
+		"enabled":  true,
+		"base_url": mockBase + "/v1",
+		"auth":     map[string]any{"api_key": upstreamKey},
+	}); err != nil {
+		return "", fmt.Errorf("save virtual provider: %w", err)
+	}
+	if err := put("/deployments/mini", map[string]any{
+		"provider": "openai",
+		"model":    upstreamModel,
+		"enabled":  true,
+	}); err != nil {
+		return "", fmt.Errorf("save virtual deployment: %w", err)
+	}
+	if err := put("/models/chat", map[string]any{
+		"enabled": true,
+		"target":  map[string]any{"type": "deployment", "deployment": "mini"},
+	}); err != nil {
+		return "", fmt.Errorf("save virtual model: %w", err)
+	}
+	if err := put("/settings/cache", map[string]any{"enabled": false}); err != nil {
+		return "", fmt.Errorf("disable virtual cache: %w", err)
+	}
+	var created struct {
+		Secret string `json:"secret"`
+	}
+	if err := apiJSONAuth(http.MethodPost, base+"/keys", token, map[string]any{
+		"name": "bench",
+		"spec": map[string]any{"enabled": true},
+	}, &created); err != nil {
+		return "", fmt.Errorf("create virtual key: %w", err)
+	}
+	if created.Secret == "" {
+		return "", fmt.Errorf("create virtual key: empty secret")
+	}
+	return created.Secret, nil
+}
+
 func apiJSON(method, url string, body any, dest any) error {
+	return apiJSONAuth(method, url, "", body, dest)
+}
+
+func apiJSONAuth(method, url, bearer string, body any, dest any) error {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -205,6 +271,9 @@ func apiJSON(method, url string, body any, dest any) error {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if bearer != "" {
+		req.Header.Set("Authorization", "Bearer "+bearer)
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

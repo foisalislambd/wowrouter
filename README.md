@@ -126,46 +126,38 @@ The same process serves an admin console at `http://127.0.0.1:8787/ui/`. It is t
 
 ## Benchmark
 
-On one machine, WowRouter, a minimal loopback proxy, and a direct connection to the same mock each took a small OpenAI chat request. The mock answers immediately, so the wait past the direct run is the target's own time. WowRouter is measured as it ships: it checks the router key, rewrites the model id, and writes an activity log on a single SQLite connection. The loopback proxy only forwards bytes. It is a baseline that lives in this harness.
+WowRouter was measured on one shared machine against the same instant mock as a loopback proxy in this harness, a direct connection, and the gateways that could actually be installed here: Antirion 0.1.1, Bifrost 2.4.0, LiteLLM 1.106.6, OmniRoute 3.8.52, Portkey gateway 1.15.2, and Helicone AI Gateway 0.2.0-beta.30. Both WowRouter paths are in the table. Classic is `openai/gpt-4o-mini`. Virtual is the model name `chat`, with the response cache off. The activity log stays on for both, because there is no switch to turn it off.
 
-The run is one shared machine, 4 CPUs, with the generator and the mock on that same machine. Bifrost and LiteLLM were not measured. The full method, the machine, and every cell are in [docs/benchmarks.md](docs/benchmarks.md). Numbers below are the medians from the run committed in `bench/results/published/`.
+This is not Antirion's published layout. The generator, the mock, and the gateway shared 4 CPUs. Antirion's own write-up uses a dedicated machine for each role and longer windows. Kong AI Gateway, Envoy AI Gateway, and TensorZero were not started: no Docker, and TensorZero's latest release publishes no gateway binary. The method, the machine, and every cell are in [docs/benchmarks.md](docs/benchmarks.md). Numbers below are medians from the run in `bench/results/published/` (commit `35fdf61`, 2026-11-01 13:55Z–15:10Z).
 
-**Simple chat at 500 requests per second**
+**Simple chat at 500 requests per second.** Overhead is that repetition's latency minus its own direct run. A dash means the cell had no successful samples to score. OmniRoute finished 0 of 2,500 requests inside the generator's 8s cap.
 
-| | WowRouter | Loopback proxy | Direct |
-| --- | ---: | ---: | ---: |
-| Overhead p50 | 688 µs | 152 µs | — |
-| Overhead p99 | 1.42 ms | 207 µs | — |
-| Latency p50 | 1.47 ms | 897 µs | 776 µs |
-| Latency p99 | 2.82 ms | 1.61 ms | 1.41 ms |
-| Success | 100% | 100% | 100% |
-| CPU per request | 708 µs | 264 µs | — |
-| Peak memory | 25.5 MiB | 14.0 MiB | — |
-| Idle memory | 23.2 MiB | 8.0 MiB | — |
+| Gateway | Overhead p50 | Overhead p99 | Latency p50 | CPU / request | Peak RSS | Idle RSS | 64-conn req/s | Highest sustained | Unknown key p50 | Errors at 500 rps |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| WowRouter classic | 673 µs | 1.30 ms | 1.42 ms | 632 µs | 26.4 MiB | 24.2 MiB | 1,901 | 1,000 rps | 605 µs | 0 |
+| WowRouter virtual | 1.09 ms | 2.06 ms | 1.83 ms | 856 µs | 29.4 MiB | 23.9 MiB | 1,512 | 1,000 rps | 607 µs | 0 |
+| Loopback proxy | 65 µs | 207 µs | 852 µs | 224 µs | 14.1 MiB | 8.1 MiB | 19,187 | 8,000 rps | — | 0 |
+| Antirion | 254 µs | 400 µs | 1.02 ms | 292 µs | 129.4 MiB | 118.1 MiB | 18,818 | 8,000 rps | 617 µs | 0 |
+| Bifrost | 423 µs | 532 µs | 1.18 ms | 764 µs | 345.1 MiB | 271.3 MiB | 7,381 | 100 rps | 748 µs | 0 |
+| LiteLLM | 52.69 ms | 311.26 ms | 53.44 ms | — | 294.6 MiB | 294.8 MiB | 598 | none | 1.18 s | 0 |
+| OmniRoute | — | — | — | 468 µs | 139.3 MiB | 130.0 MiB | 0 | none | 2.49 s | 2,500 |
+| Portkey | 831 µs | 2.41 ms | 1.59 ms | 1,240 µs | 179.2 MiB | 94.9 MiB | 2,834 | 250 rps | — | 0 |
+| Helicone | 369 µs | 652 µs | 1.08 ms | 384 µs | 46.7 MiB | 42.4 MiB | 16,872 | 8,000 rps | — | 0 |
+| Direct | — | — | 748 µs | — | — | — | 62,724 | — | — | 0 |
 
-Idle memory is the separate no-load cell. Peak memory is during this 500 requests/s run. About 8% of sends started more than 1ms late; overhead subtracts a direct run with the same kind of delay.
+LiteLLM's CPU cell is blank on purpose. The harness read 0 µs from the process it sampled while the workers were serving, so that counter is not a result. Portkey and Helicone have no stored client key in these builds, so they were not given an unknown-key cell. OmniRoute forwards an unknown model to the provider. Bifrost answers an unknown model with 403, at p50 768 µs. WowRouter classic answers one with 404 at p50 1.02 ms. The virtual path also answers 404, but at 2,000 requests/s that p50 was 2.05 s because the requests queued.
 
-**More of the same run**
+At 5,000 requests/s the median WowRouter classic repetition still finished all 15,000 requests, at p50 5.55 s. One of the three repetitions finished 14,238. Antirion and Helicone stayed under 1 ms p50 and finished every request. The direct run at that rate was p50 577 µs.
 
-| Scenario | WowRouter | Loopback proxy | Direct |
-| --- | --- | --- | --- |
-| 64 connections | 2,006 req/s, p50 30.12 ms | 20,072 req/s, p50 3.03 ms | 62,447 req/s, p50 735 µs |
-| Highest open-loop rate with p99 overhead ≤ 5ms | 1,000 req/s | — | — |
-| 1,000 req/s, overhead p50 / p99 | 721 µs / 1.58 ms | — | p50 626 µs |
-| 5,000 req/s | p50 6.12 s, 95.38% finished | — | p50 584 µs, 100% |
-| Unknown key at 2,000 req/s, p50 / p99 | 606 µs / 1.48 ms | — | — |
-| Unknown model at 2,000 req/s, p50 / p99 | 1.05 ms / 3.88 ms | — | — |
-| Streaming at 200 req/s, time-to-first-byte overhead p50 / p99 | 422 µs / 565 µs | — | — |
+Streaming at 200 requests/s is in the full report. Classic WowRouter's time-to-first-byte overhead was p50 430 µs. The virtual path returned 200 with a body that was not an SSE stream ending in `[DONE]`, so that cell was not scored. Portkey returned 500. Helicone returned 200 that was not the expected stream body.
 
-At 5,000 requests/s the router no longer keeps the schedule: requests queue for seconds, and in the median repetition 14,307 of 15,000 finished. The direct run at that rate still finished all of them. Past about 1,000 requests/s the wait is the single SQLite connection. CPU at 5,000 requests/s stayed near one core.
-
-**How it is measured.** Open loop, latency from the scheduled send time, three repetitions, median of each metric. The upstream is a local mock with no added delay. [docs/benchmarks.md](docs/benchmarks.md) has the cells, the pass rule for the saturation ladder, and the machine. **Reproduce it** on Linux with Go 1.26 or newer:
+**Reproduce it** on Linux with Go 1.26 or newer. Peer binaries are installed by `./bench/setup-targets.sh` into `bench/.cache` (not committed). Then:
 
 ```bash
-./bench/run.sh
+./bench/run.sh -out bench/results/published
 ```
 
-`npm run bench` is the same command. A new run writes `bench/results/<timestamp>/`. The numbers above will not match on another machine.
+`npm run bench` is the same harness without `-out`. A new run writes `bench/results/<timestamp>/` and will not match these numbers on another machine.
 
 ## Data
 
