@@ -21,6 +21,7 @@ import { PlaygroundScreen } from '@/features/playground/components/playground-sc
 import { PluginsScreen } from '@/features/plugins/components/plugins-screen';
 import { ProvidersScreen } from '@/features/providers/components/providers-screen';
 import { RequestLogScreen } from '@/features/request-log/components/request-log-screen';
+import { CombosScreen } from '@/features/combos/components/combos-screen';
 import { RoutingScreen } from '@/features/routing/components/routing-screen';
 import { SafetyScreen } from '@/features/safety/components/safety-screen';
 import { SettingsRedirect } from '@/features/settings/components/settings-redirect';
@@ -65,6 +66,7 @@ export function App() {
         <Route path="/providers" element={<Shell><ProvidersScreen /></Shell>} />
         <Route path="/cache" element={<Shell><CacheScreen /></Shell>} />
         <Route path="/routing" element={<Shell><RoutingScreen /></Shell>} />
+        <Route path="/combos" element={<Shell><CombosScreen /></Shell>} />
         <Route path="/playground" element={<Shell><PlaygroundScreen /></Shell>} />
         <Route path="/mcp" element={<Shell><McpScreen /></Shell>} />
         <Route path="/agents" element={<Shell><AgentsScreen /></Shell>} />

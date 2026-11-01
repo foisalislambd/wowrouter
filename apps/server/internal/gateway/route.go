@@ -320,10 +320,16 @@ func regexHit(text string, class map[string]any) bool {
 	return false
 }
 
-// Breakers tracks circuit state and latency in memory for one process.
+// Breakers tracks circuit state, key cooldowns, and quota hints in memory.
 type Breakers struct {
-	mu    sync.Mutex
-	state map[string]*breaker
+	mu        sync.Mutex
+	state     map[string]*breaker
+	keys      map[string]*keyState
+	models    map[string]time.Time
+	cursors   map[string]int
+	lastGood  map[string]string
+	quota     map[string]float64
+	quotaSeen map[string]bool
 }
 
 type breaker struct {
@@ -333,7 +339,11 @@ type breaker struct {
 	inflight int
 }
 
-func NewBreakers() *Breakers { return &Breakers{state: map[string]*breaker{}} }
+func NewBreakers() *Breakers {
+	b := &Breakers{}
+	b.initLocked()
+	return b
+}
 
 func (b *Breakers) get(name string) *breaker {
 	br := b.state[name]

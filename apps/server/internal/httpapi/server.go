@@ -39,6 +39,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/systemone", s.gatewayDecision)
 	mux.HandleFunc("POST /v1/images/generations", s.gatewayImages)
 	mux.HandleFunc("POST /v1/videos/generations", s.gatewayVideos)
+	mux.HandleFunc("POST /v1/mcp", s.mcp)
+	mux.HandleFunc("GET /v1/bridge", s.bridge)
+	mux.HandleFunc("GET /.well-known/agent.json", s.agentCard)
 	if s.Admin != nil {
 		mux.Handle("/admin/v1/", s.Admin)
 		mux.Handle("/admin/v1", s.Admin)
@@ -67,6 +70,10 @@ func (s *Server) shutdown(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (string, bool) {
+	if !s.allowIP(r) {
+		writeOpenAIError(w, http.StatusForbidden, "This address is not allowed.", "permission_error", "ip_forbidden")
+		return "", false
+	}
 	token := bearerToken(r)
 	if token == "" {
 		writeOpenAIError(w, http.StatusUnauthorized, "Missing API key. Create one in the WowRouter console and send it as a Bearer token.", "authentication_error", "invalid_api_key")

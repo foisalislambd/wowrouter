@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"wowrouter/server/internal/combo"
 )
 
 type Call struct {
@@ -71,6 +73,9 @@ func New(cat Ledger) *Engine {
 }
 
 func (e *Engine) Owns(model string) bool {
+	if combo.KnownModel(model) {
+		return true
+	}
 	_, ok := e.resolveModel(model)
 	return ok
 }
@@ -118,7 +123,51 @@ func splitDirect(name string) (string, string, bool) {
 func (e *Engine) Handle(call Call) Outcome {
 	started := e.Now()
 	out := Outcome{Status: http.StatusBadGateway, Model: call.Model}
+	text := MessageText(call.Body)
+	if safety := e.setting("safety"); safety != nil {
+		if _, blocked := guardPrompt(text, safety); blocked {
+			out.Status = http.StatusBadRequest
+			out.Blocked = true
+			out.Error = "blocked by the prompt-injection guard"
+			out.Body = errorBody(out.Error)
+			out.Latency = e.Now().Sub(started)
+			e.log(call, out, nil)
+			return out
+		}
+		if safety["pii"] == true {
+			redactMessageText(call.Body)
+			text = MessageText(call.Body)
+		}
+	}
+	if comp := e.setting("compression"); comp != nil {
+		if profile := asString(comp["profile"]); profile != "" && profile != "off" {
+			compressMessages(call.Body, profile)
+			text = MessageText(call.Body)
+		}
+	}
+	if memory := e.recall(text); memory != "" {
+		prependSystem(call.Body, memory)
+	}
+	var comboMode string
+	var comboLeaves []Leaf
 	modelSpec, ok := e.resolveModel(call.Model)
+	if !ok && combo.KnownModel(call.Model) {
+		leaves, mode, err := e.planCombo(call)
+		if err != nil || len(leaves) == 0 {
+			out.Status = http.StatusNotFound
+			out.Error = "model not found"
+			if err != nil {
+				out.Error = err.Error()
+			}
+			out.Body = errorBody(out.Error)
+			e.log(call, out, nil)
+			return out
+		}
+		comboLeaves = leaves
+		comboMode = mode
+		modelSpec = map[string]any{"enabled": true}
+		ok = true
+	}
 	if !ok {
 		out.Status = http.StatusNotFound
 		out.Error = "model not found"
@@ -126,7 +175,6 @@ func (e *Engine) Handle(call Call) Outcome {
 		e.log(call, out, nil)
 		return out
 	}
-	text := MessageText(call.Body)
 	guards := e.Cat.Resources("guardrails")
 	in := Apply(guards, text, "input")
 	if len(in.Hits) > 0 {
@@ -145,6 +193,9 @@ func (e *Engine) Handle(call Call) Outcome {
 	}
 	if err := e.enforce(call, 0); err != nil {
 		out.Status = http.StatusTooManyRequests
+		if errors.Is(err, errModelScope) {
+			out.Status = http.StatusForbidden
+		}
 		out.Error = err.Error()
 		out.Body = errorBody(out.Error)
 		out.Latency = e.Now().Sub(started)
@@ -159,7 +210,6 @@ func (e *Engine) Handle(call Call) Outcome {
 		e.log(call, out, in.Hits)
 		return out
 	}
-	tree, routeName := e.tree(modelSpec)
 	facts := Facts{
 		Text: text, Team: call.Team, Organization: call.Organization, Project: call.Project, Key: call.KeyName, Tags: call.Tags,
 		InputTokens: len(text) / 4,
@@ -168,7 +218,17 @@ func (e *Engine) Handle(call Call) Outcome {
 		Allow:       e.Breakers.Allow,
 		Rand:        float64(started.UnixNano()%1000) / 1000,
 	}
-	leaves, blocked := Plan(tree, e.Cat, facts)
+	var leaves []Leaf
+	var blocked bool
+	routeName := ""
+	if comboLeaves != nil {
+		leaves = comboLeaves
+		routeName = call.Model
+	} else {
+		var tree map[string]any
+		tree, routeName = e.tree(modelSpec)
+		leaves, blocked = Plan(tree, e.Cat, facts)
+	}
 	out.Route = routeName
 	if blocked {
 		out.Status = http.StatusBadRequest
@@ -189,7 +249,7 @@ func (e *Engine) Handle(call Call) Outcome {
 	}
 	retries := retryCount(modelSpec)
 	hedge := hedgeDelay(modelSpec)
-	if call.Body["stream"] == true && !mustBufferOutput(guards) && hedge == 0 {
+	if call.Body["stream"] == true && comboMode == "" && !mustBufferOutput(guards) && hedge == 0 {
 		if streamed, ok := e.openStream(call, leaves, &out, started, in.Hits); ok {
 			return streamed
 		}
@@ -226,12 +286,19 @@ func (e *Engine) Handle(call Call) Outcome {
 			}
 		}
 		if status < 400 {
+			e.Breakers.Remember(call.KeyName, leaf.Deployment)
 			e.writeCache(call, text, out.Body)
 			e.charge(call, out.CostUSD, out.Prompt+out.Output)
 		}
 		out.Latency = e.Now().Sub(started)
 		e.log(call, out, in.Hits)
 		return out
+	}
+	if comboMode == "fanout" {
+		return e.fanout(call, leaves, finish, &out)
+	}
+	if comboMode == "pipeline" {
+		return e.pipeline(call, leaves, finish, &out)
 	}
 	for i := 0; i < len(leaves); {
 		if hedge > 0 && i+1 < len(leaves) {
@@ -288,6 +355,9 @@ func (e *Engine) tree(model map[string]any) (map[string]any, string) {
 }
 
 func (e *Engine) enforce(call Call, extraTokens int) error {
+	if err := e.scope(call); err != nil {
+		return err
+	}
 	owners := e.owners(call)
 	for _, owner := range owners {
 		for _, lim := range LimitsOf(owner.level, owner.name, owner.spec) {
@@ -535,10 +605,14 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 	if err := SafeHTTPURL(base); err != nil {
 		return 0, nil, nil, err
 	}
+	if e.Breakers != nil && !e.Breakers.ModelAllowed(leaf.Provider, leaf.Upstream) {
+		return 0, nil, nil, fmt.Errorf("model %s is locked", leaf.Upstream)
+	}
 	wantStream := body["stream"] == true && openaiCompatible(asString(pspec["type"]))
 	path, payload, headers := ToUpstream(asString(pspec["type"]), body, leaf.Upstream)
-	key := providerKey(pspec, ppriv)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+path, bytes.NewReader(payload))
+	scrubHeaderMap(headers)
+	keyID, key := e.pickKey(leaf.Provider, pspec, ppriv)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, JoinUpstream(base, path), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -546,7 +620,7 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 		req.Header.Set(k, v)
 	}
 	ptype := asString(pspec["type"])
-	applyProviderKey(req, ptype, key)
+	applyProviderKey(req, ptype, asString(pspec["auth_style"]), key)
 	client := *e.HTTP
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 3 {
@@ -557,6 +631,15 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, nil, err
+	}
+	if remaining, ok := headerQuota(resp.Header); ok {
+		e.Breakers.SetQuota(leaf.Provider, remaining)
+	}
+	if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
+		e.Breakers.CoolKey(leaf.Provider, keyID, retryAfterHeader(resp.Header))
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		e.Breakers.LockModel(leaf.Provider, leaf.Upstream, 2*time.Minute)
 	}
 	if wantStream && resp.StatusCode < 400 && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
 		return resp.StatusCode, nil, resp.Body, nil
@@ -620,6 +703,13 @@ func (e *Engine) Record(call Call, out Outcome) {
 
 // Dial resolves a model to the provider base URL, key, and upstream model id.
 func (e *Engine) Dial(model string) (baseURL, apiKey, upstream string, err error) {
+	if combo.KnownModel(model) {
+		leaves, _, err := e.planCombo(Call{Model: model})
+		if err != nil || len(leaves) == 0 {
+			return "", "", "", fmt.Errorf("model not found")
+		}
+		return e.dialLeaf(leaves[0])
+	}
 	spec, ok := e.resolveModel(model)
 	if !ok {
 		return "", "", "", fmt.Errorf("model not found")
@@ -629,7 +719,10 @@ func (e *Engine) Dial(model string) (baseURL, apiKey, upstream string, err error
 	if blocked || len(leaves) == 0 {
 		return "", "", "", fmt.Errorf("model not found")
 	}
-	leaf := leaves[0]
+	return e.dialLeaf(leaves[0])
+}
+
+func (e *Engine) dialLeaf(leaf Leaf) (string, string, string, error) {
 	pspec, ppriv, ok := e.Cat.Resource("providers", leaf.Provider)
 	if !ok {
 		return "", "", "", fmt.Errorf("provider %s is not configured", leaf.Provider)
@@ -641,45 +734,30 @@ func (e *Engine) Dial(model string) (baseURL, apiKey, upstream string, err error
 	if base == "" {
 		base = defaultBase(asString(pspec["type"]))
 	}
-	return base, providerKey(pspec, ppriv), leaf.Upstream, nil
+	_, key := e.pickKey(leaf.Provider, pspec, ppriv)
+	return base, key, leaf.Upstream, nil
 }
 
 func providerKey(spec, priv map[string]any) string {
-	for _, src := range []map[string]any{priv, spec} {
-		if accounts := asSlice(src["accounts"]); len(accounts) > 0 {
-			for _, item := range accounts {
-				acc := asMap(item)
-				if acc["enabled"] == false {
-					continue
-				}
-				if key := asString(acc["api_key"]); key != "" && key != "[REDACTED]" {
-					return key
-				}
-			}
-		}
-		auth := asMap(src["auth"])
-		for _, item := range asSlice(auth["api_keys"]) {
-			row := asMap(item)
-			if row["enabled"] == false {
-				continue
-			}
-			if key := asString(row["key"]); key != "" && key != "[REDACTED]" {
-				return key
-			}
-		}
-	}
-	key := asString(asMap(priv["auth"])["api_key"])
-	if key == "" || key == "[REDACTED]" {
-		key = asString(asMap(spec["auth"])["api_key"])
-	}
-	if key == "[REDACTED]" {
+	slots := collectKeys(spec, priv)
+	if len(slots) == 0 {
 		return ""
 	}
-	return key
+	return slots[0].Secret
 }
 
-func applyProviderKey(req *http.Request, ptype, key string) {
-	if key == "" {
+func applyProviderKey(req *http.Request, ptype, authStyle, key string) {
+	if key == "" || authStyle == "none" {
+		return
+	}
+	switch authStyle {
+	case "x-api-key":
+		req.Header.Set("x-api-key", key)
+		return
+	case "query":
+		q := req.URL.Query()
+		q.Set("key", key)
+		req.URL.RawQuery = q.Encode()
 		return
 	}
 	switch ptype {

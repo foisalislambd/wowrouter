@@ -16,6 +16,12 @@ import { App } from '@/App';
 document.documentElement.style.setProperty('--font-hanken', '"Hanken Grotesk Variable", sans-serif');
 document.documentElement.style.setProperty('--font-jetbrains', '"JetBrains Mono Variable", ui-monospace, monospace');
 
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <BrowserRouter>
