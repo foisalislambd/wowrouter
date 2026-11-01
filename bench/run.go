@@ -196,7 +196,7 @@ func (h *benchHarness) oneRep(plan cellPlan, target string) (RepResult, error) {
 		if err != nil {
 			return rep, err
 		}
-		secret, cfgErr := configureGateway("http://" + mockAddr)
+		secret, cfgErr := configureGateway(dataDir, "http://"+mockAddr)
 		if cfgErr != nil {
 			proc.stop()
 			return rep, fmt.Errorf("%w\n%s", cfgErr, proc.tail.String())
@@ -311,7 +311,7 @@ func (h *benchHarness) spec(plan cellPlan, url, auth string, direct bool) LoadSp
 		body = h.directBody
 	}
 	if plan.id == "reject-key" {
-		auth = "sk-airoute-bench-unknown"
+		auth = "sk-wowrouter-bench-unknown"
 		if direct {
 			auth = upstreamKey
 		}

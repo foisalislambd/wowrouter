@@ -12,10 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"airoute/server/internal/admin"
-	"airoute/server/internal/httpapi"
-	"airoute/server/internal/secret"
-	"airoute/server/internal/store"
+	"wowrouter/server/internal/admin"
+	"wowrouter/server/internal/httpapi"
+	"wowrouter/server/internal/migrate"
 )
 
 type Options struct {
@@ -43,36 +42,39 @@ func Run(ctx context.Context, opt Options) error {
 	if err := os.MkdirAll(opt.DataDir, 0o700); err != nil {
 		return err
 	}
-	key, err := secret.LoadKey(opt.DataDir)
-	if err != nil {
+	sources := []string{opt.DataDir}
+	if extra, err := legacyConfigDir(); err == nil && extra != opt.DataDir {
+		sources = append(sources, extra)
+	}
+	if err := migrate.Prepare(opt.DataDir, sources); err != nil {
 		return err
 	}
-	db, err := store.Open(filepath.Join(opt.DataDir, "airoute.db"), key)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
-
-	webDir := FindWebDir(opt.WebDir)
-	consoleDir := FindConsoleDir(opt.ConsoleDir)
-	gatewayDB, bootstrap, err := admin.Open(filepath.Join(opt.DataDir, "gateway.db"))
+	gatewayDB, bootstrap, err := admin.Open(filepath.Join(opt.DataDir, migrate.DBName))
 	if err != nil {
 		return err
 	}
 	defer gatewayDB.Close()
+	if err := migrate.Apply(gatewayDB, opt.DataDir, sources); err != nil {
+		return err
+	}
 	if os.Getenv("WOWROUTER_SAMPLE_DATA") == "1" {
 		if err := admin.SeedSample(gatewayDB); err != nil {
 			return err
 		}
 	}
+	consoleDir := opt.WebDir
+	if consoleDir == "" {
+		consoleDir = opt.ConsoleDir
+	}
+	consoleDir = FindWebDir(consoleDir)
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	api := httpapi.New(db, webDir, opt.Addr, opt.DataDir)
+	api := httpapi.New(opt.Addr, opt.DataDir)
 	api.ConsoleDir = consoleDir
 	api.Admin = admin.New(gatewayDB, "1.1.8")
 	api.Stop = stop
 	if bootstrap != "" {
-		log.Printf("gateway console http://%s/ui/", opt.Addr)
+		log.Printf("panel http://%s/", opt.Addr)
 		log.Printf("admin token (shown once): %s", bootstrap)
 	}
 	server := &http.Server{
@@ -92,10 +94,10 @@ func Run(ctx context.Context, opt Options) error {
 	}
 	log.Printf("WowRouter listening on http://%s", opt.Addr)
 	log.Printf("data directory: %s", opt.DataDir)
-	if webDir == "" {
-		log.Printf("panel build not found; API is up, UI will come from the Vite dev server")
+	if consoleDir == "" {
+		log.Printf("panel build not found; API is up")
 	} else {
-		log.Printf("serving panel from %s", webDir)
+		log.Printf("serving panel from %s", consoleDir)
 	}
 	errCh := make(chan error, 1)
 	go func() {
@@ -128,7 +130,7 @@ func validateListenAddr(addr string) error {
 	if strings.EqualFold(host, "localhost") {
 		return nil
 	}
-	if (os.Getenv("WOWROUTER_IN_DOCKER") == "1" || os.Getenv("AIROUTE_IN_DOCKER") == "1") && (host == "0.0.0.0" || host == "::") {
+	if inDocker() && (host == "0.0.0.0" || host == "::") {
 		return nil
 	}
 	ip := net.ParseIP(host)
@@ -138,12 +140,24 @@ func validateListenAddr(addr string) error {
 	return nil
 }
 
+func inDocker() bool {
+	return os.Getenv("WOWROUTER_IN_DOCKER") == "1"
+}
+
 func DefaultDataDir() (string, error) {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "airoute-router"), nil
+	return filepath.Join(base, "wowrouter"), nil
+}
+
+func legacyConfigDir() (string, error) {
+	base, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(base, migrate.LegacyDirName), nil
 }
 
 func FindWebDir(explicit string) string {
@@ -151,10 +165,6 @@ func FindWebDir(explicit string) string {
 	if exe, err := os.Executable(); err == nil {
 		exeDir = filepath.Dir(exe)
 	}
-	return pickWebDir(webDirCandidates(explicit, exeDir))
-}
-
-func webDirCandidates(explicit, exeDir string) []string {
 	var candidates []string
 	if explicit != "" {
 		candidates = append(candidates, explicit)
@@ -162,16 +172,11 @@ func webDirCandidates(explicit, exeDir string) []string {
 	if exeDir != "" {
 		candidates = append(candidates, filepath.Join(exeDir, "panel"))
 	}
-	return append(candidates, filepath.Join("apps", "panel", "dist"), "dist")
-}
-
-func FindConsoleDir(explicit string) string {
-	if explicit != "" {
-		if dir := pickWebDir([]string{explicit}); dir != "" {
-			return dir
-		}
-	}
-	return pickWebDir([]string{filepath.Join("apps", "console", "out")})
+	candidates = append(candidates,
+		filepath.Join("apps", "panel", "dist"),
+		filepath.Join("panel"),
+	)
+	return pickWebDir(candidates)
 }
 
 func pickWebDir(candidates []string) string {

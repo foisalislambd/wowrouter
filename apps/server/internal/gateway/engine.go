@@ -39,6 +39,10 @@ type Outcome struct {
 	Output   int
 	Latency  time.Duration
 	Error    string
+	Stream   io.ReadCloser
+	SSE      bool
+	SkipLog  bool
+	Hits     []GuardHit
 }
 
 type Ledger interface {
@@ -65,18 +69,55 @@ func New(cat Ledger) *Engine {
 }
 
 func (e *Engine) Owns(model string) bool {
-	if e == nil || e.Cat == nil || strings.Contains(model, "/") {
-		return false
-	}
-	_, _, ok := e.Cat.Resource("models", model)
+	_, ok := e.resolveModel(model)
 	return ok
+}
+
+func (e *Engine) resolveModel(name string) (map[string]any, bool) {
+	if e == nil || e.Cat == nil || strings.TrimSpace(name) == "" {
+		return nil, false
+	}
+	if spec, _, ok := e.Cat.Resource("models", name); ok {
+		if spec["enabled"] == false {
+			return nil, false
+		}
+		return spec, true
+	}
+	provider, upstream, ok := splitDirect(name)
+	if !ok {
+		return nil, false
+	}
+	pspec, _, pok := e.Cat.Resource("providers", provider)
+	if !pok || pspec["enabled"] == false {
+		return nil, false
+	}
+	for _, dep := range e.Cat.Resources("deployments") {
+		if dep.Spec["enabled"] == false {
+			continue
+		}
+		if asString(dep.Spec["provider"]) == provider && asString(dep.Spec["model"]) == upstream {
+			return map[string]any{
+				"enabled": true,
+				"target":  map[string]any{"type": "deployment", "deployment": dep.Name},
+			}, true
+		}
+	}
+	return nil, false
+}
+
+func splitDirect(name string) (string, string, bool) {
+	i := strings.IndexByte(name, '/')
+	if i <= 0 || i >= len(name)-1 || strings.Contains(name[i+1:], "/") {
+		return "", "", false
+	}
+	return name[:i], name[i+1:], true
 }
 
 func (e *Engine) Handle(call Call) Outcome {
 	started := e.Now()
 	out := Outcome{Status: http.StatusBadGateway, Model: call.Model}
-	modelSpec, _, ok := e.Cat.Resource("models", call.Model)
-	if !ok || modelSpec["enabled"] == false {
+	modelSpec, ok := e.resolveModel(call.Model)
+	if !ok {
 		out.Status = http.StatusNotFound
 		out.Error = "model not found"
 		out.Body = errorBody(out.Error)
@@ -144,9 +185,14 @@ func (e *Engine) Handle(call Call) Outcome {
 		e.log(call, out, in.Hits)
 		return out
 	}
-	var lastErr string
 	retries := retryCount(modelSpec)
 	hedge := hedgeDelay(modelSpec)
+	if call.Body["stream"] == true && !mustBufferOutput(guards) && hedge == 0 {
+		if streamed, ok := e.openStream(call, leaves, &out, started, in.Hits); ok {
+			return streamed
+		}
+	}
+	var lastErr string
 	finish := func(leaf Leaf, status int, payload []byte) Outcome {
 		out.Status = status
 		out.Body = payload
@@ -159,7 +205,7 @@ func (e *Engine) Handle(call Call) Outcome {
 		}
 		out.CostUSD = PriceUSD(leaf.PriceIn, leaf.PriceOut, out.Prompt, out.Output)
 		respText := ResponseText(payload)
-		after := Apply(guards, respText, "output")
+		after := ApplyCall(guards, respText, "output", call.Body)
 		if len(after.Hits) > 0 {
 			out.Flagged = true
 			in.Hits = append(in.Hits, after.Hits...)
@@ -196,12 +242,20 @@ func (e *Engine) Handle(call Call) Outcome {
 			continue
 		}
 		leaf := leaves[i]
+		schemaTries := 0
 		for attempt := 0; attempt <= retries; attempt++ {
 			out.Attempts++
 			status, payload, err := e.one(leaf, call.Body)
 			if err != nil || status >= 500 || status == http.StatusTooManyRequests {
 				lastErr = errString(err, status)
 				continue
+			}
+			if status < 400 {
+				if failed, reask := schemaNeedsRetry(guards, payload, call.Body); failed && schemaTries < reask {
+					schemaTries++
+					attempt--
+					continue
+				}
 			}
 			return finish(leaf, status, payload)
 		}
@@ -450,9 +504,21 @@ func (e *Engine) note(name string, ms float64, status int, err error) {
 }
 
 func (e *Engine) callUpstream(ctx context.Context, leaf Leaf, body map[string]any) (int, []byte, error) {
+	status, payload, stream, err := e.callUpstreamEx(ctx, leaf, body)
+	if stream != nil {
+		defer stream.Close()
+		if err != nil {
+			return status, payload, err
+		}
+		payload, err = io.ReadAll(io.LimitReader(stream, 8<<20))
+	}
+	return status, payload, err
+}
+
+func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]any) (int, []byte, io.ReadCloser, error) {
 	pspec, ppriv, ok := e.Cat.Resource("providers", leaf.Provider)
 	if !ok {
-		return 0, nil, fmt.Errorf("provider %s is not configured", leaf.Provider)
+		return 0, nil, nil, fmt.Errorf("provider %s is not configured", leaf.Provider)
 	}
 	base := asString(ppriv["base_url"])
 	if base == "" {
@@ -462,40 +528,23 @@ func (e *Engine) callUpstream(ctx context.Context, leaf Leaf, body map[string]an
 		base = defaultBase(asString(pspec["type"]))
 	}
 	if base == "" {
-		return 0, nil, fmt.Errorf("provider %s has no base URL", leaf.Provider)
+		return 0, nil, nil, fmt.Errorf("provider %s has no base URL", leaf.Provider)
 	}
 	if err := SafeHTTPURL(base); err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
+	wantStream := body["stream"] == true && openaiCompatible(asString(pspec["type"]))
 	path, payload, headers := ToUpstream(asString(pspec["type"]), body, leaf.Upstream)
-	key := asString(asMap(ppriv["auth"])["api_key"])
-	if key == "" {
-		key = asString(asMap(pspec["auth"])["api_key"])
-	}
-	if key == "[REDACTED]" {
-		key = ""
-	}
+	key := providerKey(pspec, ppriv)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+path, bytes.NewReader(payload))
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
 	ptype := asString(pspec["type"])
-	if key != "" {
-		if ptype == "azure" || ptype == "azure_openai" {
-			req.Header.Set("api-key", key)
-		} else if ptype == "anthropic" || ptype == "anthropic_compatible" {
-			req.Header.Set("x-api-key", key)
-		} else if ptype == "gemini" {
-			q := req.URL.Query()
-			q.Set("key", key)
-			req.URL.RawQuery = q.Encode()
-		} else {
-			req.Header.Set("Authorization", "Bearer "+key)
-		}
-	}
+	applyProviderKey(req, ptype, key)
 	client := *e.HTTP
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 3 {
@@ -505,17 +554,173 @@ func (e *Engine) callUpstream(ctx context.Context, leaf Leaf, body map[string]an
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, nil, err
+		return 0, nil, nil, err
 	}
-	defer resp.Body.Close()
+	if wantStream && resp.StatusCode < 400 && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+		return resp.StatusCode, nil, resp.Body, nil
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	resp.Body.Close()
 	if err != nil {
-		return resp.StatusCode, nil, err
+		return resp.StatusCode, nil, nil, err
 	}
 	if ptype == "anthropic" || ptype == "anthropic_compatible" || ptype == "gemini" {
 		raw = normalizeUpstream(ptype, leaf.Upstream, raw)
 	}
-	return resp.StatusCode, raw, nil
+	if wantStream && resp.StatusCode < 400 {
+		raw = CompletionToSSE(leaf.Upstream, raw)
+	}
+	return resp.StatusCode, raw, nil, nil
+}
+
+func (e *Engine) openStream(call Call, leaves []Leaf, out *Outcome, started time.Time, hits []GuardHit) (Outcome, bool) {
+	var lastErr string
+	for _, leaf := range leaves {
+		out.Attempts++
+		status, payload, stream, err := e.callUpstreamEx(context.Background(), leaf, call.Body)
+		if err != nil || status >= 500 || status == http.StatusTooManyRequests {
+			if stream != nil {
+				stream.Close()
+			}
+			lastErr = errString(err, status)
+			continue
+		}
+		out.Status = status
+		out.Provider = leaf.Provider
+		out.Trail = append(out.Trail, leaf.Trail...)
+		out.Hits = hits
+		if stream != nil {
+			out.Stream = stream
+			out.SkipLog = true
+			out.Latency = e.Now().Sub(started)
+			return *out, true
+		}
+		out.Body = payload
+		out.SSE = status < 400
+		out.Latency = e.Now().Sub(started)
+		e.log(call, *out, hits)
+		return *out, true
+	}
+	out.Status = http.StatusBadGateway
+	out.Error = lastErr
+	if out.Error == "" {
+		out.Error = "upstream failed"
+	}
+	out.Body = errorBody(out.Error)
+	out.Latency = e.Now().Sub(started)
+	e.log(call, *out, hits)
+	return *out, true
+}
+
+func (e *Engine) Record(call Call, out Outcome) {
+	e.log(call, out, out.Hits)
+}
+
+// Dial resolves a model to the provider base URL, key, and upstream model id.
+func (e *Engine) Dial(model string) (baseURL, apiKey, upstream string, err error) {
+	spec, ok := e.resolveModel(model)
+	if !ok {
+		return "", "", "", fmt.Errorf("model not found")
+	}
+	tree, _ := e.tree(spec)
+	leaves, blocked := Plan(tree, e.Cat, Facts{Allow: e.Breakers.Allow})
+	if blocked || len(leaves) == 0 {
+		return "", "", "", fmt.Errorf("model not found")
+	}
+	leaf := leaves[0]
+	pspec, ppriv, ok := e.Cat.Resource("providers", leaf.Provider)
+	if !ok {
+		return "", "", "", fmt.Errorf("provider %s is not configured", leaf.Provider)
+	}
+	base := asString(ppriv["base_url"])
+	if base == "" {
+		base = asString(pspec["base_url"])
+	}
+	if base == "" {
+		base = defaultBase(asString(pspec["type"]))
+	}
+	return base, providerKey(pspec, ppriv), leaf.Upstream, nil
+}
+
+func providerKey(spec, priv map[string]any) string {
+	if accounts := asSlice(priv["accounts"]); len(accounts) > 0 {
+		for _, item := range accounts {
+			acc := asMap(item)
+			if acc["enabled"] == false {
+				continue
+			}
+			if key := asString(acc["api_key"]); key != "" {
+				return key
+			}
+		}
+	}
+	key := asString(asMap(priv["auth"])["api_key"])
+	if key == "" {
+		key = asString(asMap(spec["auth"])["api_key"])
+	}
+	if key == "[REDACTED]" {
+		return ""
+	}
+	return key
+}
+
+func applyProviderKey(req *http.Request, ptype, key string) {
+	if key == "" {
+		return
+	}
+	switch ptype {
+	case "azure", "azure_openai":
+		req.Header.Set("api-key", key)
+	case "anthropic", "anthropic_compatible":
+		req.Header.Set("x-api-key", key)
+	case "gemini":
+		q := req.URL.Query()
+		q.Set("key", key)
+		req.URL.RawQuery = q.Encode()
+	default:
+		req.Header.Set("Authorization", "Bearer "+key)
+	}
+}
+
+func openaiCompatible(ptype string) bool {
+	switch ptype {
+	case "anthropic", "anthropic_compatible", "gemini":
+		return false
+	default:
+		return true
+	}
+}
+
+func mustBufferOutput(rules []Named) bool {
+	for _, rule := range rules {
+		spec := rule.Spec
+		if spec["enabled"] == false || !stageWanted(spec, "output") {
+			continue
+		}
+		if asString(spec["type"]) == "json_schema" || asString(spec["action"]) == "block" {
+			return true
+		}
+	}
+	return false
+}
+
+func schemaNeedsRetry(rules []Named, payload []byte, req map[string]any) (bool, int) {
+	text := ResponseText(payload)
+	failed := false
+	reask := 0
+	for _, rule := range rules {
+		spec := rule.Spec
+		if spec["enabled"] == false || asString(spec["type"]) != "json_schema" || !stageWanted(spec, "output") {
+			continue
+		}
+		if err := checkJSONSchema(spec, text, req); err != nil {
+			failed = true
+			if n := int(asFloat(asMap(spec["json_schema"])["reask"])); n > reask {
+				reask = n
+			}
+		}
+	}
+	return failed, reask
 }
 
 func normalizeUpstream(ptype, model string, raw []byte) []byte {

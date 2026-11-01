@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"airoute/server/app"
+	"wowrouter/server/app"
 )
 
 func main() {

@@ -120,14 +120,14 @@ func cellFilter(raw string) map[string]bool {
 
 func benchmarkNotes() []string {
 	return []string{
-		"The generator, the mock, and the target share one machine. This is a local measurement, in the spirit of Antirion's laptop topology, not its isolated c7i reference run.",
-		"WowRouter is measured as it ships. Each chat request checks the router key, resolves the model, rewrites the body, calls the upstream, updates the account, and appends the activity log. Those database calls share one SQLite connection. Nothing in this run turns that off.",
+		"The generator, the mock, and the target share one machine. This is a local measurement, not an isolated multi-machine reference run.",
+		"WowRouter is measured as it ships, with the exact response cache turned off. Each chat request checks the router key against an in-memory snapshot, reads that key row from SQLite for project and team, resolves the model from the snapshot, rewrites the body, and calls the upstream. The activity log is queued onto one background SQLite writer.",
 		"The loopback proxy is a baseline that lives in this harness: a Go reverse proxy with no authentication, no rewrite, and no request log. It is not another product.",
 		"Open-loop latency starts at the scheduled send time, so time spent waiting for a slow target counts. Closed-loop latency starts when the attempt starts.",
 		"Overhead is the target percentile minus the direct-run percentile from the same repetition. Latency and overhead are medians of those per-repetition values, so the overhead cell is not always the subtraction of the two latency cells.",
-		"A direct run is clean when at least 99.5% of its requests succeed and its p99 is within 5ms. Antirion's dedicated-mock rule is 1ms; that bound does not hold on this shared machine, where the direct path itself is about 1–2ms.",
+		"A direct run is clean when at least 99.5% of its requests succeed and its p99 is within 5ms. A 1ms bound does not hold on this shared machine, where the direct path itself is about 1–2ms.",
 		"The saturation ladder passes a step at 99.5% success and at most 5ms of p99 overhead, and only when the direct run is clean. It stops at the first step that misses.",
 		"Requests the generator cannot start within 8s of their scheduled time are counted as not_sent errors. The generator caps in-flight requests at 1024.",
-		"Bifrost and LiteLLM are not part of this run. WowRouter listens only on loopback, so this harness cannot place them on separate machines the way Antirion's published comparison does.",
+		"Bifrost and LiteLLM are not part of this run. WowRouter listens only on loopback, so this harness does not place other gateways on separate machines.",
 	}
 }

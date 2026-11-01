@@ -146,10 +146,17 @@ func firstNonEmpty(values ...string) string {
 // ToUpstream rewrites an OpenAI chat body for a provider type.
 func ToUpstream(providerType string, body map[string]any, upstreamModel string) (path string, payload []byte, headers map[string]string) {
 	body = cloneMap(body)
-	// The data plane reads a full JSON completion so guardrails and usage see the answer.
-	delete(body, "stream")
+	keepStream := body["stream"] == true
+	switch providerType {
+	case "anthropic", "anthropic_compatible", "gemini":
+		delete(body, "stream")
+		keepStream = false
+	}
 	body["model"] = upstreamModel
 	headers = map[string]string{"Content-Type": "application/json", "Accept": "application/json"}
+	if keepStream {
+		headers["Accept"] = "text/event-stream, application/json"
+	}
 	switch providerType {
 	case "anthropic", "anthropic_compatible":
 		path = "/v1/messages"

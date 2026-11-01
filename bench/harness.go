@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -165,23 +166,31 @@ func waitHealthy(url string, timeout time.Duration, proc *childProc) error {
 	return last
 }
 
-func configureGateway(mockBase string) (string, error) {
+func configureGateway(dataDir, mockBase string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(dataDir, "bootstrap-token"))
+	if err != nil {
+		return "", fmt.Errorf("bootstrap token: %w", err)
+	}
+	token := strings.TrimSpace(string(raw))
 	base := "http://" + gatewayAddr
 	body := map[string]any{
 		"apiKey":  upstreamKey,
 		"baseUrl": mockBase + "/v1",
 		"enabled": true,
 	}
-	if err := apiJSON(http.MethodPut, base+"/api/providers/openai", body, nil); err != nil {
+	if err := apiJSON(http.MethodPut, base+"/api/providers/openai", body, nil, token); err != nil {
 		return "", fmt.Errorf("save openai provider: %w", err)
 	}
-	if err := apiJSON(http.MethodPut, base+"/api/providers/openai/models/"+upstreamModel, map[string]any{"active": true}, nil); err != nil {
+	if err := apiJSON(http.MethodPut, base+"/api/providers/openai/models/"+upstreamModel, map[string]any{"active": true}, nil, token); err != nil {
 		return "", fmt.Errorf("activate model: %w", err)
+	}
+	if err := apiJSON(http.MethodPut, base+"/api/cache", map[string]any{"enabled": false}, nil, token); err != nil {
+		return "", fmt.Errorf("disable cache: %w", err)
 	}
 	var created struct {
 		Secret string `json:"secret"`
 	}
-	if err := apiJSON(http.MethodPost, base+"/api/keys", map[string]any{"name": "bench"}, &created); err != nil {
+	if err := apiJSON(http.MethodPost, base+"/api/keys", map[string]any{"name": "bench"}, &created, token); err != nil {
 		return "", fmt.Errorf("create router key: %w", err)
 	}
 	if created.Secret == "" {
@@ -190,7 +199,7 @@ func configureGateway(mockBase string) (string, error) {
 	return created.Secret, nil
 }
 
-func apiJSON(method, url string, body any, dest any) error {
+func apiJSON(method, url string, body any, dest any, token string) error {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -205,6 +214,9 @@ func apiJSON(method, url string, body any, dest any) error {
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

@@ -7,23 +7,30 @@ import (
 	"strings"
 )
 
-func (s *Server) console() http.Handler {
+func (s *Server) panel() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ui" || strings.HasPrefix(r.URL.Path, "/ui/") {
+			target := strings.TrimPrefix(r.URL.Path, "/ui")
+			if target == "" {
+				target = "/"
+			}
+			http.Redirect(w, r, target, http.StatusFound)
+			return
+		}
 		if s.ConsoleDir == "" {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.WriteHeader(http.StatusServiceUnavailable)
-			_, _ = w.Write([]byte("<p>WowRouter console is not built. From <code>apps/console</code> run <code>pnpm install</code> and <code>pnpm build</code>.</p>"))
+			_, _ = w.Write([]byte("<p>WowRouter panel is not built. From the repo root run <code>npm run build:panel</code>.</p>"))
 			return
-		}
-		rel := strings.TrimPrefix(r.URL.Path, "/ui")
-		rel = strings.TrimPrefix(rel, "/")
-		if rel == "" {
-			rel = "index.html"
 		}
 		root, err := filepath.Abs(s.ConsoleDir)
 		if err != nil {
-			http.Error(w, "console unavailable", http.StatusInternalServerError)
+			http.Error(w, "panel unavailable", http.StatusInternalServerError)
 			return
+		}
+		rel := strings.TrimPrefix(r.URL.Path, "/")
+		if rel == "" {
+			rel = "index.html"
 		}
 		file := filepath.Join(root, filepath.Clean("/"+rel))
 		abs, err := filepath.Abs(file)
@@ -31,13 +38,10 @@ func (s *Server) console() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		if info, err := os.Stat(abs); err == nil && info.IsDir() {
-			abs = filepath.Join(abs, "index.html")
-		}
-		if _, err := os.Stat(abs); err != nil {
-			http.ServeFile(w, r, filepath.Join(root, "404.html"))
+		if info, statErr := os.Stat(abs); statErr == nil && !info.IsDir() {
+			http.ServeFile(w, r, abs)
 			return
 		}
-		http.ServeFile(w, r, abs)
+		http.ServeFile(w, r, filepath.Join(root, "index.html"))
 	})
 }
