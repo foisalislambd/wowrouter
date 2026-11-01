@@ -44,8 +44,31 @@ func renderReport(report *Report) string {
 		fmt.Fprintf(&b, "- %s\n", note)
 	}
 	b.WriteString("\n")
+	if len(report.Targets) > 0 {
+		b.WriteString("## Targets\n\n")
+		b.WriteString("| Target | Version | Setup |\n| --- | --- | --- |\n")
+		for _, target := range report.Targets {
+			fmt.Fprintf(&b, "| %s | %s | %s |\n", displayTarget(target.Name), emptyDash(target.Version), emptyDash(target.Detail))
+		}
+		b.WriteString("\n")
+	}
+	if len(report.NotRun) > 0 {
+		b.WriteString("## Not run\n\n")
+		for _, item := range report.NotRun {
+			fmt.Fprintf(&b, "- **%s.** %s\n", item.Name, item.Reason)
+		}
+		b.WriteString("\n")
+	}
 	for _, cell := range report.Cells {
 		writeCell(&b, cell)
+	}
+	writeComparison(&b, report)
+	if len(report.Failures) > 0 {
+		b.WriteString("## Start and sanity failures\n\n")
+		for _, fail := range report.Failures {
+			fmt.Fprintf(&b, "- %s / %s: %s\n", fail.Cell, displayTarget(fail.Target), strings.ReplaceAll(fail.Error, "\n", " "))
+		}
+		b.WriteString("\n")
 	}
 	return b.String()
 }
@@ -157,11 +180,27 @@ func writeIdle(b *strings.Builder, cell CellResult) {
 }
 
 func writeLadder(b *strings.Builder, cell CellResult) {
+	if len(cell.Steps) > 0 && cell.Steps[0].LadderFor != "" {
+		b.WriteString("Each gateway has its own ladder. A step is one repetition, 1s warm-up and 3s measure. That gateway's ladder stops at its first miss.\n\n")
+		for _, group := range cell.Steps {
+			fmt.Fprintf(b, "### %s\n\n", displayTarget(group.LadderFor))
+			writeLadderTable(b, group)
+		}
+		return
+	}
 	b.WriteString("Each step is one repetition, 1s warm-up and 3s measure. The ladder stops at the first step that misses the pass rule.\n\n")
+	writeLadderTable(b, cell)
+}
+
+func writeLadderTable(b *strings.Builder, cell CellResult) {
 	b.WriteString("| Offered | Success | p50 | p99 | Overhead p50 | Overhead p99 | Direct p99 | Result |\n")
 	b.WriteString("| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |\n")
+	name := cell.LadderFor
+	if name == "" {
+		name = "wowrouter"
+	}
 	for _, step := range cell.Steps {
-		median := step.Targets["wowrouter"].Median
+		median := step.Targets[name].Median
 		result := "pass"
 		if cell.LadderStop != "" && strings.HasPrefix(cell.LadderStop, fmt.Sprintf("%d rps:", step.Rate)) {
 			result = "stop"
@@ -190,13 +229,20 @@ func writeLadder(b *strings.Builder, cell CellResult) {
 }
 
 func targetNames(cell CellResult) []string {
+	rank := map[string]int{}
+	for i, name := range targetOrder {
+		rank[name] = i
+	}
 	names := make([]string, 0, len(cell.Targets))
 	for name := range cell.Targets {
 		names = append(names, name)
 	}
 	sort.Slice(names, func(i, j int) bool {
-		order := map[string]int{"wowrouter": 0, "proxy": 1}
-		return order[names[i]] < order[names[j]]
+		ri, rj := rank[names[i]], rank[names[j]]
+		if ri == rj {
+			return names[i] < names[j]
+		}
+		return ri < rj
 	})
 	return names
 }
@@ -205,8 +251,22 @@ func displayTarget(name string) string {
 	switch name {
 	case "wowrouter":
 		return "WowRouter"
+	case "virtual":
+		return "WowRouter (model chat)"
 	case "proxy":
 		return "Loopback proxy"
+	case "antirion":
+		return "Antirion"
+	case "bifrost":
+		return "Bifrost"
+	case "litellm":
+		return "LiteLLM"
+	case "omniroute":
+		return "OmniRoute"
+	case "portkey":
+		return "Portkey"
+	case "helicone":
+		return "Helicone"
 	default:
 		return name
 	}
@@ -300,4 +360,136 @@ func emptyDash(value string) string {
 		return "—"
 	}
 	return value
+}
+
+func writeComparison(b *strings.Builder, report *Report) {
+	h1 := findCell(report, "h1")
+	closed := findCell(report, "closed-64")
+	idle := findCell(report, "idle")
+	ladder := findCell(report, "ladder")
+	rejectKey := findCell(report, "reject-key")
+	rejectModel := findCell(report, "reject-model")
+	if h1 == nil && closed == nil {
+		return
+	}
+	b.WriteString("## Comparison\n\n")
+	b.WriteString("Medians. Overhead is against that repetition's own direct run. A dash means that cell was not run for that target, or the target produced no successful samples to score.\n\n")
+	b.WriteString("| Gateway | Overhead p50 | Overhead p99 | Latency p50 | Latency p99 | CPU / request | Peak RSS | Idle RSS | 64-conn req/s | 64-conn p50 | Highest sustained | Unknown key p50 | Unknown model p50 | Errors at 500 rps |\n")
+	b.WriteString("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |\n")
+	names := map[string]bool{}
+	for _, cell := range []*CellResult{h1, closed, idle, rejectKey, rejectModel} {
+		if cell == nil {
+			continue
+		}
+		for name := range cell.Targets {
+			names[name] = true
+		}
+	}
+	if ladder != nil {
+		for _, group := range ladder.Steps {
+			if group.LadderFor != "" {
+				names[group.LadderFor] = true
+			}
+		}
+	}
+	ordered := make([]string, 0, len(names))
+	for _, name := range targetOrder {
+		if names[name] {
+			ordered = append(ordered, name)
+		}
+	}
+	for _, name := range ordered {
+		h1m := medianOf(h1, name)
+		closedm := medianOf(closed, name)
+		idlem := medianOf(idle, name)
+		keym := medianOf(rejectKey, name)
+		modelm := medianOf(rejectModel, name)
+		sat := "—"
+		if ladder != nil {
+			for _, group := range ladder.Steps {
+				if group.LadderFor == name && group.SaturationRPS != nil {
+					sat = fmt.Sprintf("%d rps", *group.SaturationRPS)
+				}
+			}
+		}
+		errText := "—"
+		if h1m != nil {
+			errText = fmt.Sprintf("%d", h1m.Run.Errors)
+		}
+		fmt.Fprintf(b, "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
+			displayTarget(name),
+			overheadOf(h1m, func(r RepResult) int64 { return r.OverheadP50Us }),
+			overheadOf(h1m, func(r RepResult) int64 { return r.OverheadP99Us }),
+			latencyOf(h1m, func(r RepResult) int64 { return r.Run.LatencyP50Us }),
+			latencyOf(h1m, func(r RepResult) int64 { return r.Run.LatencyP99Us }),
+			cpuOf(h1m),
+			rssOf(h1m, true),
+			rssOf(idlem, false),
+			rpsOf(closedm),
+			latencyOf(closedm, func(r RepResult) int64 { return r.Run.LatencyP50Us }),
+			sat,
+			latencyOf(keym, func(r RepResult) int64 { return r.Run.LatencyP50Us }),
+			latencyOf(modelm, func(r RepResult) int64 { return r.Run.LatencyP50Us }),
+			errText,
+		)
+	}
+	b.WriteString("\n")
+}
+
+func findCell(report *Report, id string) *CellResult {
+	for i := range report.Cells {
+		if report.Cells[i].ID == id {
+			return &report.Cells[i]
+		}
+	}
+	return nil
+}
+
+func medianOf(cell *CellResult, name string) *RepResult {
+	if cell == nil {
+		return nil
+	}
+	target, ok := cell.Targets[name]
+	if !ok || len(target.Reps) == 0 {
+		return nil
+	}
+	return &target.Median
+}
+
+func overheadOf(rep *RepResult, get func(RepResult) int64) string {
+	if rep == nil || !rep.OverheadValid {
+		return "—"
+	}
+	return fmtUS(get(*rep))
+}
+
+func latencyOf(rep *RepResult, get func(RepResult) int64) string {
+	if rep == nil || rep.Run.Success == 0 {
+		return "—"
+	}
+	return fmtUS(get(*rep))
+}
+
+func cpuOf(rep *RepResult) string {
+	if rep == nil || rep.Run.Completed == 0 {
+		return "—"
+	}
+	return fmt.Sprintf("%.0f µs", rep.CPUUsPerRequest)
+}
+
+func rssOf(rep *RepResult, peak bool) string {
+	if rep == nil {
+		return "—"
+	}
+	if peak {
+		return fmtMiB(rep.PeakRSSBytes)
+	}
+	return fmtMiB(rep.IdleRSSBytes)
+}
+
+func rpsOf(rep *RepResult) string {
+	if rep == nil {
+		return "—"
+	}
+	return fmt.Sprintf("%s req/s", fmtRPS(rep.Run.SuccessRPS))
 }

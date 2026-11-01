@@ -25,6 +25,7 @@ type LoadSpec struct {
 	URL            string
 	Body           []byte
 	Auth           string
+	Extra          map[string]string
 	Rate           int
 	Concurrency    int
 	Warmup         time.Duration
@@ -239,7 +240,12 @@ func doRequest(client *http.Client, spec LoadSpec, scheduled time.Time, measure 
 		return sample{class: "request", measure: measure, latency: time.Since(scheduled)}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+spec.Auth)
+	if spec.Auth != "" {
+		req.Header.Set("Authorization", "Bearer "+spec.Auth)
+	}
+	for key, value := range spec.Extra {
+		req.Header.Set(key, value)
+	}
 	began := time.Now()
 	resp, err := client.Do(req)
 	out := sample{

@@ -128,9 +128,11 @@ The panel is the whole admin UI: providers, virtual models, routing, guardrails,
 
 On one machine, WowRouter, a minimal loopback proxy, and a direct connection to the same mock each took a small OpenAI chat request. The mock answers immediately, so the wait past the direct run is the target's own time. The response cache was off. The loopback proxy only forwards bytes. It is a baseline that lives in this harness.
 
-The run is one shared machine, 4 CPUs, with the generator and the mock on that same machine. Bifrost and LiteLLM were not measured. The full method, the machine, and every cell are in [docs/benchmarks.md](docs/benchmarks.md). Numbers below are the medians from the run in `bench/results/published/` (`2026-11-01`, version 1.1.8).
+The same harness can also start the gateways that install on this machine: Antirion 0.1.1, Bifrost 2.4.0, LiteLLM 1.106.6, OmniRoute 3.8.52, Portkey gateway 1.15.2, and Helicone AI Gateway 0.2.0-beta.30. WowRouter is one gateway. The model `chat` target is that same gateway configured through the admin API, not a second router. Kong AI Gateway, Envoy AI Gateway, and TensorZero were not started: no Docker, and TensorZero's latest release publishes no gateway binary.
 
-**Simple chat at 500 requests per second**
+The generator, the mock, and the gateway shared 4 CPUs. That is not Antirion's published layout, which uses a dedicated machine for each role and longer windows. The method and every cell are in [docs/benchmarks.md](docs/benchmarks.md). Numbers below are the medians from the unified-gateway run in `bench/results/published/` (`2026-11-01`, version 1.1.8). The peer-gateway table from the earlier run is in that document, under Peer gateways, and in `bench/results/comparison/`.
+
+**Simple chat at 500 requests per second.** Overhead is that repetition's latency minus its own direct run. A dash means the cell had no successful samples to score.
 
 | | WowRouter | Loopback proxy | Direct |
 | --- | ---: | ---: | ---: |
@@ -143,9 +145,8 @@ The run is one shared machine, 4 CPUs, with the generator and the mock on that s
 | Peak memory | 22.7 MiB | 13.8 MiB | — |
 | Idle memory | 13.8 MiB | 8.1 MiB | — |
 
-Idle memory is the separate no-load cell. Peak memory is during this 500 requests/s run. About 8% of sends started more than 1ms late; overhead subtracts a direct run with the same kind of delay.
+The peer-gateway run is in [docs/benchmarks.md](docs/benchmarks.md#peer-gateways). On that earlier binary, Antirion's overhead p50 was 254 µs, Bifrost 423 µs, Helicone 369 µs, and Portkey 831 µs. LiteLLM was 52.69 ms. OmniRoute finished none of the 2,500 requests inside 8 seconds. LiteLLM's CPU cell is blank because the harness read 0 µs from the process it sampled while the workers were serving.
 
-**More of the same run**
 
 | Scenario | WowRouter | Loopback proxy | Direct |
 | --- | --- | --- | --- |
@@ -157,15 +158,15 @@ Idle memory is the separate no-load cell. Peak memory is during this 500 request
 | Unknown model at 2,000 req/s, p50 / p99 | 718 µs / 2.12 ms | — | — |
 | Streaming at 200 req/s, time-to-first-byte overhead p50 / p99 | 336 µs / 523 µs | — | — |
 
-At 5,000 requests/s every request finished. p99 overhead rose to 13.88 ms, so the saturation ladder stops at 2,000 requests/s. The closed loop at 64 connections kept the gateway near two cores. A later run of that cell, after the activity-log queue was capped, peaked at 30.7 MiB and still finished about 6,200–7,500 requests/s.
+At 5,000 requests/s every request finished. p99 overhead rose to 13.88 ms, so the saturation ladder stops at 2,000 requests/s. The closed loop at 64 connections kept the gateway near two cores. A later run of that cell, after the activity-log queue was capped, peaked at 30.7 MiB and still finished about 6,200–7,500 requests/s. Streaming time-to-first-byte overhead was p50 336 µs.
 
-**How it is measured.** Open loop, latency from the scheduled send time, three repetitions, median of each metric. The upstream is a local mock with no added delay. [docs/benchmarks.md](docs/benchmarks.md) has the cells, the pass rule for the saturation ladder, and the machine. **Reproduce it** on Linux with Go 1.26 or newer:
+**How it is measured.** Open loop, latency from the scheduled send time, three repetitions, median of each metric. The upstream is a local mock with no added delay. [docs/benchmarks.md](docs/benchmarks.md) has the cells, the pass rule for the saturation ladder, and the machine. **Reproduce it** on Linux with Go 1.26 or newer. Peer binaries are installed by `./bench/setup-targets.sh` into `bench/.cache` (not committed). Then:
 
 ```bash
-./bench/run.sh
+./bench/run.sh -out bench/results/published
 ```
 
-`npm run bench` is the same command. A new run writes `bench/results/<timestamp>/`. The numbers above will not match on another machine.
+`npm run bench` is the same harness without `-out`. A new run writes `bench/results/<timestamp>/` and will not match these numbers on another machine.
 
 ## Data
 
