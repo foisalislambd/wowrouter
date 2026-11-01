@@ -15,9 +15,7 @@ docker run -d --name wowrouter \
 
 `foisalislambd/airoute:latest` is the same image. Open `http://127.0.0.1:8787`. Point Cursor at `http://127.0.0.1:8787/v1`.
 
-`127.0.0.1:8787:8787` means only this computer can open the panel. Inside the container the server listens on all interfaces, which is what Docker needs in order to publish the port. Do not publish it as `8787:8787` unless you want every machine on your network to reach the panel. The panel has no login.
-
-An image built from this repository's Dockerfile also serves the gateway console at `http://127.0.0.1:8787/ui/`. The first start writes `bootstrap-token` into the `/data` volume. The classic panel at `/` is unchanged. A published Hub tag includes `/ui/` only after that tag is rebuilt from this Dockerfile.
+`127.0.0.1:8787:8787` means only this computer can open the panel. Inside the container the server listens on all interfaces, which is what Docker needs in order to publish the port. Do not publish it as `8787:8787` unless you want every machine on your network to reach the panel. Sign in with the admin token written to `/data/bootstrap-token` on first start. `/ui` redirects to `/`.
 
 From the repo, Compose builds the local source and names that image `wowrouter:local`. It does not pull the published `latest` tag. The Compose volume is `wowrouter`.
 
@@ -27,7 +25,7 @@ docker compose up -d --build
 
 ## Your keys
 
-The volume `/data` holds `airoute.db` and `secret.key`. It is not the same folder as `%AppData%\airoute-router`. Keys you saved in the desktop app are not inside the container until you copy those two files into the volume.
+The volume `/data` holds `wowrouter.db` and `secret.key`. It is not the same folder as the desktop data directory. Provider keys you saved in the desktop app are not inside the container until you copy the database and `secret.key` into the volume. Old router keys are not imported.
 
 ```bash
 docker stop wowrouter

@@ -4,8 +4,10 @@ Versions follow the `version` field in the root `package.json`. Releases are pub
 
 ## Unreleased
 
-- The product name is WowRouter. npm, Docker Hub, and GitHub Packages still publish `airoute`, and they also publish `wowrouter`.
-- Existing data stays in the `airoute-router` folder, in `airoute.db`. Router keys still start with `sk-airoute-`.
+- One gateway and one Vite panel, served at `/`. `/ui` redirects there.
+- The database is `wowrouter.db` in the `wowrouter` data folder. First start imports providers, provider keys, models, fallbacks, and settings from an older install and leaves those files in place. Old router keys are not imported. Create new keys; they start with `sk-wowrouter-`.
+- npm, Docker Hub, and GitHub Packages still publish the `airoute` package name, the `airoute` command, and the `foisalislambd/airoute` and `ghcr.io/foisalislambd/airoute` images. Those names are the same WowRouter build.
+- Portions of the gateway listed in NOTICE remain under Apache-2.0, Copyright 2026 Elias Biondo. The web UI is not that code.
 
 ## 1.1.2
 

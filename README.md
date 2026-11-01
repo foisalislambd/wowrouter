@@ -6,7 +6,7 @@ The router listens only on this machine, at `http://127.0.0.1:8787`. Nothing in 
 
 | What you open | Address |
 | --- | --- |
-| Web panel | `http://127.0.0.1:8787` |
+| Web panel | `http://127.0.0.1:8787/` |
 | OpenAI-compatible API | `http://127.0.0.1:8787/v1` |
 
 The panel is where you add provider keys, turn models on, and create the router key your tools will use. The API is what Cursor calls.
@@ -24,7 +24,7 @@ wowrouter
 
 `npm install -g airoute` and the `airoute` command are the same program. The same version is also published as `@foisalislambd/wowrouter` and `@foisalislambd/airoute` on GitHub Packages.
 
-Desktop builds are attached to each [GitHub release](https://github.com/foisalislambd/wowrouter/releases). Unzip the archive for your system and run `WowRouter` (`WowRouter.exe` on Windows). The panel folder in that archive is the page the app serves.
+Desktop builds are attached to each [GitHub release](https://github.com/foisalislambd/wowrouter/releases). Unzip the archive for your system and run `WowRouter` (`WowRouter.exe` on Windows). The panel folder in that archive is the page the app serves. The first start prints an admin token and writes `bootstrap-token` in the data folder. Sign in with that token. Router keys you create start with `sk-wowrouter-`.
 
 Docker uses the same panel and API. The host port stays on this computer:
 
@@ -42,19 +42,19 @@ The same image is also `foisalislambd/airoute`, `ghcr.io/foisalislambd/wowrouter
 1. Open the panel.
 2. Go to **Providers**, open a provider, paste that provider's API key, and save it.
 3. Turn on the models you want to call. A model that is off is not offered to clients.
-4. Open **API keys** and create a router key. The secret is shown once and starts with `sk-airoute-`.
+4. Open **API keys** and create a router key. The secret is shown once and starts with `sk-wowrouter-`.
 5. In Cursor, or any OpenAI client, set the base URL to `http://127.0.0.1:8787/v1` and the API key to that router key.
 
 A public model id looks like `openai/gpt-4o-mini`: the provider slug, a slash, then the upstream model id. WowRouter rewrites that to the id the provider expects.
 
 ```bash
 curl http://127.0.0.1:8787/v1/chat/completions \
-  -H "Authorization: Bearer sk-airoute-..." \
+  -H "Authorization: Bearer sk-wowrouter-..." \
   -H "Content-Type: application/json" \
   -d "{\"model\":\"openai/gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}"
 ```
 
-Chat calls need three things at once: a saved provider key, the model switched on, and a router key on the request. The panel itself does not ask for the router key, because it is only served on localhost.
+Chat calls need three things at once: a saved provider key, the model switched on, and a router key on the request. The panel asks for the admin token before it shows those pages.
 
 Some providers ship with an empty model list. **Load models** on that provider's page fills the list from the provider. Loading replaces that provider's current model list.
 
@@ -122,26 +122,26 @@ Providers whose decision API speaks System One are called directly. The Together
 
 ## Gateway console
 
-The same process serves an admin console at `http://127.0.0.1:8787/ui/`. It is the gateway UI: providers, virtual models, routing, guardrails, budgets, keys, and the request log. Build it once from `apps/console` (`pnpm install` and `pnpm build`), then start the server from the repo root. The first start writes an admin token to `bootstrap-token` in the data directory. Sign in at `/ui/login/`. Virtual model names have no slash (`chat`). Names like `openai/gpt-4o-mini` stay on the existing router. Details are in [docs/gateway/getting-started.md](docs/gateway/getting-started.md).
+The panel is the whole admin UI: providers, virtual models, routing, guardrails, budgets, keys, and the request log. `/ui` redirects to `/`. Details are in [docs/gateway/getting-started.md](docs/gateway/getting-started.md).
 
 ## Benchmark
 
-On one machine, WowRouter, a minimal loopback proxy, and a direct connection to the same mock each took a small OpenAI chat request. The mock answers immediately, so the wait past the direct run is the target's own time. WowRouter is measured as it ships: it checks the router key, rewrites the model id, and writes an activity log on a single SQLite connection. The loopback proxy only forwards bytes. It is a baseline that lives in this harness.
+On one machine, WowRouter, a minimal loopback proxy, and a direct connection to the same mock each took a small OpenAI chat request. The mock answers immediately, so the wait past the direct run is the target's own time. The response cache was off. The loopback proxy only forwards bytes. It is a baseline that lives in this harness.
 
-The run is one shared machine, 4 CPUs, with the generator and the mock on that same machine. Bifrost and LiteLLM were not measured. The full method, the machine, and every cell are in [docs/benchmarks.md](docs/benchmarks.md). Numbers below are the medians from the run committed in `bench/results/published/`.
+The run is one shared machine, 4 CPUs, with the generator and the mock on that same machine. Bifrost and LiteLLM were not measured. The full method, the machine, and every cell are in [docs/benchmarks.md](docs/benchmarks.md). Numbers below are the medians from the run in `bench/results/published/` (`2026-11-01`, version 1.1.8).
 
 **Simple chat at 500 requests per second**
 
 | | WowRouter | Loopback proxy | Direct |
 | --- | ---: | ---: | ---: |
-| Overhead p50 | 688 µs | 152 µs | — |
-| Overhead p99 | 1.42 ms | 207 µs | — |
-| Latency p50 | 1.47 ms | 897 µs | 776 µs |
-| Latency p99 | 2.82 ms | 1.61 ms | 1.41 ms |
+| Overhead p50 | 269 µs | 102 µs | — |
+| Overhead p99 | 469 µs | 114 µs | — |
+| Latency p50 | 1.04 ms | 850 µs | 762 µs |
+| Latency p99 | 1.87 ms | 1.60 ms | 1.41 ms |
 | Success | 100% | 100% | 100% |
-| CPU per request | 708 µs | 264 µs | — |
-| Peak memory | 25.5 MiB | 14.0 MiB | — |
-| Idle memory | 23.2 MiB | 8.0 MiB | — |
+| CPU per request | 596 µs | 228 µs | — |
+| Peak memory | 22.7 MiB | 13.8 MiB | — |
+| Idle memory | 13.8 MiB | 8.1 MiB | — |
 
 Idle memory is the separate no-load cell. Peak memory is during this 500 requests/s run. About 8% of sends started more than 1ms late; overhead subtracts a direct run with the same kind of delay.
 
@@ -149,15 +149,15 @@ Idle memory is the separate no-load cell. Peak memory is during this 500 request
 
 | Scenario | WowRouter | Loopback proxy | Direct |
 | --- | --- | --- | --- |
-| 64 connections | 2,006 req/s, p50 30.12 ms | 20,072 req/s, p50 3.03 ms | 62,447 req/s, p50 735 µs |
-| Highest open-loop rate with p99 overhead ≤ 5ms | 1,000 req/s | — | — |
-| 1,000 req/s, overhead p50 / p99 | 721 µs / 1.58 ms | — | p50 626 µs |
-| 5,000 req/s | p50 6.12 s, 95.38% finished | — | p50 584 µs, 100% |
-| Unknown key at 2,000 req/s, p50 / p99 | 606 µs / 1.48 ms | — | — |
-| Unknown model at 2,000 req/s, p50 / p99 | 1.05 ms / 3.88 ms | — | — |
-| Streaming at 200 req/s, time-to-first-byte overhead p50 / p99 | 422 µs / 565 µs | — | — |
+| 64 connections | 6,744 req/s, p50 7.97 ms | 19,816 req/s, p50 3.10 ms | 55,455 req/s, p50 809 µs |
+| Highest open-loop rate with p99 overhead ≤ 5ms | 2,000 req/s | — | — |
+| 1,000 req/s, overhead p50 / p99 | 338 µs / 641 µs | — | p50 635 µs |
+| 5,000 req/s | p50 2.28 ms, 100% finished, overhead p99 13.88 ms | — | p50 572 µs, 100% |
+| Unknown key at 2,000 req/s, p50 / p99 | 587 µs / 1.37 ms | — | — |
+| Unknown model at 2,000 req/s, p50 / p99 | 718 µs / 2.12 ms | — | — |
+| Streaming at 200 req/s, time-to-first-byte overhead p50 / p99 | 336 µs / 523 µs | — | — |
 
-At 5,000 requests/s the router no longer keeps the schedule: requests queue for seconds, and in the median repetition 14,307 of 15,000 finished. The direct run at that rate still finished all of them. Past about 1,000 requests/s the wait is the single SQLite connection. CPU at 5,000 requests/s stayed near one core.
+At 5,000 requests/s every request finished. p99 overhead rose to 13.88 ms, so the saturation ladder stops at 2,000 requests/s. The closed loop at 64 connections kept the gateway near two cores and pushed resident memory to about 557 MiB in the median repetition.
 
 **How it is measured.** Open loop, latency from the scheduled send time, three repetitions, median of each metric. The upstream is a local mock with no added delay. [docs/benchmarks.md](docs/benchmarks.md) has the cells, the pass rule for the saturation ladder, and the machine. **Reproduce it** on Linux with Go 1.26 or newer:
 
@@ -173,11 +173,11 @@ Keys and logs stay in one folder:
 
 | System | Folder |
 | --- | --- |
-| Windows | `%AppData%\airoute-router` |
-| macOS | `~/Library/Application Support/airoute-router` |
-| Linux | `$XDG_CONFIG_HOME/airoute-router`, or `~/.config/airoute-router` |
+| Windows | `%AppData%\wowrouter` |
+| macOS | `~/Library/Application Support/wowrouter` |
+| Linux | `$XDG_CONFIG_HOME/wowrouter`, or `~/.config/wowrouter` |
 
-That folder holds `airoute.db`, `secret.key`, and, for the desktop app, `desktop.json`. Provider keys are encrypted with the local secret. Router keys are stored as hashes; the panel cannot show a router key again after you leave the create screen. The desktop app also writes `agent.log` there.
+That folder holds `wowrouter.db`, `secret.key`, `bootstrap-token`, and, for the desktop app, `desktop.json`. On first start, WowRouter also reads an older `airoute-router` folder and imports providers, provider keys, models, fallbacks, settings, and recent history. It does not import old router keys. Create new `sk-wowrouter-` keys. The old files are kept. Provider keys are encrypted with the local secret. Router keys are stored as hashes; the panel cannot show a router key again after you leave the create screen. The desktop app also writes `agent.log` there.
 
 Deleting the folder removes keys, logs, and settings. Keep a copy of `secret.key` with the database if you move the folder. One without the other cannot decrypt provider keys.
 
@@ -189,23 +189,19 @@ Go 1.26 or newer and Node.js 20 or newer.
 
 ```bash
 npm install
+npm run build:panel
 npm run dev:server
 npm run dev:panel
 ```
 
-The Vite panel runs at `http://127.0.0.1:5173` and talks to the Go server on port 8787. For a production panel served by Go itself:
-
-```bash
-npm run build:panel
-npm run dev:desktop
-```
+The Vite panel runs at `http://127.0.0.1:5173` and talks to the Go server on port 8787. `npm run build:panel` writes the folder the server, desktop app, npm package, and Docker image serve.
 
 `npm run build:npm` builds the panel and the server binaries that the npm package ships, into `packages/cli`. Those build outputs are not committed.
 
 | Path | Role |
 | --- | --- |
 | `apps/server` | Go router, SQLite, and the HTTP API |
-| `apps/panel` | React panel |
+| `apps/panel` | Vite panel, the only web UI |
 | `apps/desktop` | Native window and background agent |
 | `packages/cli` | npm package that launches the server and opens the panel |
 | `packages/sse` | Parser for OpenAI server-sent chat streams |
