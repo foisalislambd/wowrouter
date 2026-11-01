@@ -44,6 +44,8 @@ func Profile(name string) []string {
 
 var fence = regexp.MustCompile("(?s)```.*?```")
 
+const holeMark = "\uE000"
+
 // Apply runs the profile over text. Code fences, URLs, and JSON objects are
 // kept byte for byte. query is the latest user question, used by relevance.
 func Apply(profile, text, query string) (string, []string) {
@@ -131,7 +133,7 @@ func rtk(text string) string {
 			b.WriteString(itoa(len(lines) - 32))
 			b.WriteString(" lines omitted …\n")
 		}
-		if i >= 24 && i < len(lines)-8 {
+		if i >= 24 && i < len(lines)-8 && !strings.Contains(line, holeMark) {
 			continue
 		}
 		if b.Len() > 0 {
@@ -160,7 +162,7 @@ func relevance(text, query string) string {
 				score++
 			}
 		}
-		if score > 0 {
+		if score > 0 || strings.Contains(sentence, holeMark) {
 			keep = append(keep, sentence)
 		}
 	}
@@ -210,15 +212,16 @@ func replaceFold(text, phrase, with string) string {
 func shield(text string) (string, []string) {
 	var holes []string
 	out := fence.ReplaceAllStringFunc(text, func(block string) string {
+		token := holeMark + itoa(len(holes)) + "\uE001"
 		holes = append(holes, block)
-		return "\x00"
+		return token
 	})
 	return out, holes
 }
 
 func restore(text string, holes []string) string {
-	for _, hole := range holes {
-		text = strings.Replace(text, "\x00", hole, 1)
+	for i, hole := range holes {
+		text = strings.Replace(text, holeMark+itoa(i)+"\uE001", hole, 1)
 	}
 	return text
 }

@@ -4,6 +4,8 @@ import (
 	"errors"
 	"regexp"
 	"strings"
+
+	"wowrouter/server/internal/compress"
 )
 
 var errModelScope = errors.New("this key cannot call that model")
@@ -125,6 +127,75 @@ func memoryWords(text string) map[string]bool {
 		}
 	}
 	return out
+}
+
+// redactMessageText rewrites each text part in place. It does not merge turns.
+func redactMessageText(body map[string]any) {
+	editMessageText(body, func(s string) string {
+		s = emailRE.ReplaceAllString(s, "[email]")
+		s = ssnRE.ReplaceAllString(s, "[ssn]")
+		return cardRE.ReplaceAllString(s, "[card]")
+	})
+}
+
+// compressMessages shrinks each text part on its own. JSON values are left
+// unchanged. The relevance query is the latest user text, not the whole transcript.
+func compressMessages(body map[string]any, profile string) {
+	query := lastUserText(body)
+	editMessageText(body, func(s string) string {
+		trimmed := strings.TrimSpace(s)
+		if strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[") {
+			return s
+		}
+		next, _ := compress.Apply(profile, s, query)
+		if next == "" {
+			return s
+		}
+		return next
+	})
+}
+
+func lastUserText(body map[string]any) string {
+	var last string
+	for _, item := range asSlice(body["messages"]) {
+		m := asMap(item)
+		if asString(m["role"]) != "user" {
+			continue
+		}
+		if s, ok := m["content"].(string); ok {
+			last = s
+		}
+	}
+	return last
+}
+
+func editMessageText(body map[string]any, fn func(string) string) {
+	if body == nil || fn == nil {
+		return
+	}
+	msgs := asSlice(body["messages"])
+	for i, item := range msgs {
+		m := asMap(item)
+		switch c := m["content"].(type) {
+		case string:
+			m["content"] = fn(c)
+			msgs[i] = m
+		case []any:
+			for j, part := range c {
+				pm := asMap(part)
+				if pm == nil {
+					continue
+				}
+				if t := asString(pm["text"]); t != "" {
+					pm["text"] = fn(t)
+					c[j] = pm
+				}
+			}
+			m["content"] = c
+			msgs[i] = m
+		}
+	}
+	body["messages"] = msgs
 }
 
 func prependSystem(body map[string]any, note string) {

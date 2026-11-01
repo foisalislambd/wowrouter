@@ -1,6 +1,8 @@
 package gateway
 
 import (
+	"net/http"
+	"sync"
 	"testing"
 	"time"
 )
@@ -86,6 +88,65 @@ func TestModelLockout(t *testing.T) {
 	if !b.ModelAllowed("openai", "other") {
 		t.Fatal("other model")
 	}
+}
+
+func TestZeroQuotaStaysKnown(t *testing.T) {
+	b := NewBreakers()
+	if _, ok := b.Quota("p"); ok {
+		t.Fatal("unknown looked known")
+	}
+	b.SetQuota("p", 0)
+	q, ok := b.Quota("p")
+	if !ok || q != 0 {
+		t.Fatalf("%v %v", q, ok)
+	}
+}
+
+func TestRetryAfterHTTPDate(t *testing.T) {
+	h := http.Header{}
+	h.Set("Retry-After", time.Now().Add(30*time.Second).UTC().Format(http.TimeFormat))
+	d := retryAfterHeader(h)
+	if d < 20*time.Second || d > 40*time.Second {
+		t.Fatal(d)
+	}
+}
+
+func TestDistinctKeyIDsKeepBothSecrets(t *testing.T) {
+	spec := map[string]any{"auth": map[string]any{"api_key": "from-spec"}}
+	priv := map[string]any{"auth": map[string]any{"api_key": "from-priv"}}
+	slots := collectKeys(spec, priv)
+	if len(slots) != 2 || slots[0].Secret == slots[1].Secret || slots[0].ID == slots[1].ID {
+		t.Fatalf("%+v", slots)
+	}
+	e := New(nil)
+	seen := map[string]bool{}
+	for i := 0; i < 2; i++ {
+		_, secret := e.pickKey("openai", spec, priv)
+		seen[secret] = true
+	}
+	if !seen["from-spec"] || !seen["from-priv"] {
+		t.Fatal(seen)
+	}
+}
+
+func TestBreakerMethodsAreSafeConcurrently(t *testing.T) {
+	b := NewBreakers()
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for n := 0; n < 50; n++ {
+				b.NextKey("p", []string{"a", "b"})
+				b.CoolKey("p", "a", time.Millisecond)
+				b.LockModel("p", "m", time.Millisecond)
+				b.SetQuota("p", 1)
+				_, _ = b.Quota("p")
+				_ = b.ModelAllowed("p", "m")
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func TestPickKeyUsesEveryAccount(t *testing.T) {

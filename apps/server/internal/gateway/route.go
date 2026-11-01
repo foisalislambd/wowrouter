@@ -322,13 +322,14 @@ func regexHit(text string, class map[string]any) bool {
 
 // Breakers tracks circuit state, key cooldowns, and quota hints in memory.
 type Breakers struct {
-	mu       sync.Mutex
-	state    map[string]*breaker
-	keys     map[string]*keyState
-	models   map[string]time.Time
-	cursors  map[string]int
-	lastGood map[string]string
-	quota    map[string]float64
+	mu        sync.Mutex
+	state     map[string]*breaker
+	keys      map[string]*keyState
+	models    map[string]time.Time
+	cursors   map[string]int
+	lastGood  map[string]string
+	quota     map[string]float64
+	quotaSeen map[string]bool
 }
 
 type breaker struct {

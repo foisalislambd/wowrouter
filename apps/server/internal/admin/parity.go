@@ -27,12 +27,16 @@ func (a *API) installPreset(w http.ResponseWriter, id string) {
 		writeErr(w, http.StatusNotFound, "not_found", "No preset with that id.")
 		return
 	}
+	if !p.HTTP() {
+		writeErr(w, http.StatusBadRequest, "no_http_base", "This preset has no HTTP base URL. It needs a browser login or a custom endpoint.")
+		return
+	}
 	if _, err := a.Store.Get("providers", p.ID); err == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"provider": p.ID, "installed": true, "existed": true})
 		return
 	}
 	spec := map[string]any{
-		"type":       presetType(p.Format),
+		"type":       presetType(p.Format, p.BaseURL),
 		"base_url":   p.BaseURL,
 		"enabled":    true,
 		"free":       p.Free,
@@ -61,15 +65,17 @@ func (a *API) installPreset(w http.ResponseWriter, id string) {
 	writeJSON(w, http.StatusCreated, map[string]any{"provider": p.ID, "deployment": dep, "installed": true})
 }
 
-func presetType(format string) string {
+func presetType(format, base string) string {
 	switch strings.ToLower(format) {
 	case "claude", "anthropic":
 		return "anthropic"
 	case "gemini":
 		return "gemini"
-	default:
-		return "openai_compatible"
 	}
+	if strings.Contains(strings.ToLower(base), "://api.anthropic.com") {
+		return "anthropic"
+	}
+	return "openai_compatible"
 }
 
 func sanitizeName(s string) string {

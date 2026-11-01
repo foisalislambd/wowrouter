@@ -83,17 +83,20 @@ func (e *Engine) planCombo(call Call) ([]Leaf, string, error) {
 		var latency float64
 		var inflight int
 		var quota float64
+		quotaKnown := false
 		if e.Breakers != nil {
-			healthy = e.Breakers.Allow(provider) && e.Breakers.ModelAllowed(provider, upstream)
-			latency = e.Breakers.Latency(provider)
-			inflight = e.Breakers.InFlight(provider)
-			quota = e.Breakers.Quota(provider)
+			healthy = e.Breakers.Allow(dep.Name) && e.Breakers.ModelAllowed(provider, upstream)
+			latency = e.Breakers.Latency(dep.Name)
+			inflight = e.Breakers.InFlight(dep.Name)
+			if q, ok := e.Breakers.Quota(provider); ok {
+				quota, quotaKnown = q, true
+			}
 		}
-		if quota <= 0 {
-			quota = asFloat(dep.Spec["quota"])
-		}
-		if quota <= 0 {
-			quota = 1
+		if !quotaKnown {
+			if _, present := dep.Spec["quota"]; present {
+				quota = asFloat(dep.Spec["quota"])
+				quotaKnown = true
+			}
 		}
 		w := weight[dep.Name]
 		if w <= 0 {
@@ -112,6 +115,7 @@ func (e *Engine) planCombo(call Call) ([]Leaf, string, error) {
 			Weight:       w,
 			Cost:         asFloat(dep.Spec["price_in"]),
 			Quota:        quota,
+			QuotaKnown:   quotaKnown,
 			Reset:        reset,
 			InFlight:     inflight,
 			Latency:      latency,

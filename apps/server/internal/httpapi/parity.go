@@ -13,6 +13,16 @@ import (
 	"wowrouter/server/internal/presets"
 )
 
+func publicBase(addr string) string {
+	if addr == "" {
+		addr = "127.0.0.1:8787"
+	}
+	if strings.HasPrefix(addr, ":") {
+		addr = "127.0.0.1" + addr
+	}
+	return "http://" + addr
+}
+
 func (s *Server) allowIP(r *http.Request) bool {
 	if s.Admin == nil {
 		return true
@@ -25,18 +35,28 @@ func (s *Server) allowIP(r *http.Request) bool {
 	if len(raw) == 0 {
 		return true
 	}
-	host := r.RemoteAddr
-	if h, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+	return remoteAllowed(r.RemoteAddr, raw)
+}
+
+func remoteAllowed(remote string, rules []any) bool {
+	if len(rules) == 0 {
+		return true
+	}
+	host := remote
+	if h, _, err := net.SplitHostPort(remote); err == nil {
 		host = h
 	}
 	ip := net.ParseIP(host)
-	for _, item := range raw {
+	for _, item := range rules {
 		rule := strings.TrimSpace(str(item))
-		if rule == "" || rule == host || rule == "*" {
-			if rule != "" {
-				return true
-			}
+		if rule == "" {
 			continue
+		}
+		if rule == "*" || rule == host {
+			return true
+		}
+		if rip := net.ParseIP(rule); rip != nil && ip != nil && rip.Equal(ip) {
+			return true
 		}
 		if strings.Contains(rule, "/") && ip != nil {
 			if _, network, err := net.ParseCIDR(rule); err == nil && network.Contains(ip) {
@@ -51,7 +71,7 @@ func (s *Server) agentCard(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"name":        "WowRouter",
 		"description": "Local LLM gateway",
-		"url":         "http://" + s.Addr + "/a2a/gateway",
+		"url":         publicBase(s.Addr) + "/a2a/gateway",
 		"version":     "1.1.8",
 		"capabilities": map[string]any{
 			"streaming": true,
@@ -79,6 +99,10 @@ func (s *Server) bridge(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key")) == "" {
+		writeAPIError(w, http.StatusBadRequest, "missing websocket key")
+		return
+	}
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		writeAPIError(w, http.StatusInternalServerError, "websocket is not available")
@@ -89,15 +113,28 @@ func (s *Server) bridge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer conn.Close()
-	key := r.Header.Get("Sec-WebSocket-Key")
+	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
 	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
 	accept := base64.StdEncoding.EncodeToString(sum[:])
 	_, _ = bufrw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n")
 	_ = bufrw.Flush()
-	payload := []byte(`{"type":"ready","service":"wowrouter"}`)
-	frame := []byte{0x81, byte(len(payload))}
-	frame = append(frame, payload...)
-	_, _ = conn.Write(frame)
+	_, _ = conn.Write(wsTextFrame([]byte(`{"type":"ready","service":"wowrouter"}`)))
+}
+
+func wsTextFrame(payload []byte) []byte {
+	frame := []byte{0x81}
+	n := len(payload)
+	switch {
+	case n < 126:
+		frame = append(frame, byte(n))
+	case n <= 65535:
+		frame = append(frame, 126, byte(n>>8), byte(n))
+	default:
+		frame = append(frame, 127,
+			byte(n>>56), byte(n>>48), byte(n>>40), byte(n>>32),
+			byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+	}
+	return append(frame, payload...)
 }
 
 func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {

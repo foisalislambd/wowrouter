@@ -25,6 +25,10 @@ type Candidate struct {
 	Healthy      bool
 	Subscription bool
 	Quality      float64
+	// QuotaKnown distinguishes "remaining is zero" from "we have not heard".
+	// A positive Quota with QuotaKnown false is still treated as known so
+	// older callers keep working.
+	QuotaKnown bool
 }
 
 // Request is what the caller knows about this turn.
@@ -87,7 +91,7 @@ func Order(strategy string, cands []Candidate, req Request) Result {
 	}
 	switch strategy {
 	case "fill-first":
-		sort.SliceStable(alive, func(i, j int) bool { return alive[i].Quota < alive[j].Quota })
+		sort.SliceStable(alive, func(i, j int) bool { return lessQuota(alive[i], alive[j], true) })
 		return failover(alive)
 	case "weighted":
 		return failover(weightedOrder(alive, req.Rand))
@@ -134,7 +138,7 @@ func Order(strategy string, cands []Candidate, req Request) Result {
 		sort.SliceStable(alive, func(i, j int) bool { return alive[i].Cost < alive[j].Cost })
 		return failover(alive)
 	case "headroom", "auto/offline":
-		sort.SliceStable(alive, func(i, j int) bool { return alive[i].Quota > alive[j].Quota })
+		sort.SliceStable(alive, func(i, j int) bool { return lessQuota(alive[i], alive[j], false) })
 		return failover(alive)
 	case "quota-weighted":
 		if pinned := pin(alive); req.Session != "" && pinned != nil {
@@ -166,12 +170,9 @@ func Order(strategy string, cands []Candidate, req Request) Result {
 		if key == "" {
 			key = "prefix"
 		}
-		h := int(fnv.New32a().Sum([]byte(key))[0]) % 251
-		// fnv of string
 		sum := fnv.New32a()
 		_, _ = sum.Write([]byte(key))
 		idx := int(sum.Sum32() % uint32(len(alive)))
-		_ = h
 		first := alive[idx]
 		return failover(append([]Candidate{first}, without(alive, first.ID)...))
 	case "lkgp", "auto/lkgp", "auto":
@@ -191,7 +192,7 @@ func Order(strategy string, cands []Candidate, req Request) Result {
 	case "auto/subscription":
 		var sub []Candidate
 		for _, c := range alive {
-			if c.Subscription && c.Quota > 0 {
+			if subscriptionOpen(c) {
 				sub = append(sub, c)
 			}
 		}
@@ -200,7 +201,7 @@ func Order(strategy string, cands []Candidate, req Request) Result {
 	case "auto/thrifty":
 		var sub, paid []Candidate
 		for _, c := range alive {
-			if c.Subscription && c.Quota > 0 {
+			if subscriptionOpen(c) {
 				sub = append(sub, c)
 			} else {
 				paid = append(paid, c)
@@ -281,13 +282,16 @@ func weightedBy(c []Candidate, r float64, w func(Candidate) float64) []Candidate
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].w > rows[j].w })
 	ordered := make([]Candidate, len(rows))
 	for i := range rows {
-		ordered[i] = rows[i].c
+		item := rows[i].c
+		if rows[i].w > 0 {
+			item.Weight = rows[i].w
+		}
+		ordered[i] = item
 	}
 	if len(ordered) == 0 {
 		return nil
 	}
 	pick := weightedPick(ordered, r)
-	// Rebuild weights on the original function by copying Weight.
 	return append([]Candidate{pick}, without(ordered, pick.ID)...)
 }
 
@@ -333,7 +337,11 @@ func score(c []Candidate, req Request) []Candidate {
 // factors is a stand-in for a 16-factor score: health is already filtered,
 // then quota, cost, latency, quality, load, context fit, subscription, and recency.
 func factors(c Candidate, req Request) float64 {
-	quota := clamp(c.Quota, 0, 1)
+	q, known := effectiveQuota(c)
+	quota := 0.5
+	if known {
+		quota = clamp(q, 0, 1)
+	}
 	cost := 1 / (1 + math.Max(c.Cost, 0))
 	lat := 1 / (1 + math.Max(c.Latency, 0)/1000)
 	load := 1 / float64(c.InFlight+1)
@@ -364,16 +372,52 @@ func fit(context, need int) float64 {
 }
 
 func sooner(a, b, now time.Time) bool {
-	if a.IsZero() && b.IsZero() {
+	return resetRank(a, now) < resetRank(b, now)
+}
+
+// resetRank orders an already-reset window first, then the soonest future
+// reset, and an unknown reset last.
+func resetRank(t, now time.Time) int64 {
+	if t.IsZero() {
+		return 1 << 62
+	}
+	if !now.IsZero() && !t.After(now) {
+		return 0
+	}
+	return t.Unix()
+}
+
+func effectiveQuota(c Candidate) (float64, bool) {
+	if c.QuotaKnown {
+		return c.Quota, true
+	}
+	if c.Quota > 0 {
+		return c.Quota, true
+	}
+	return 0, false
+}
+
+func subscriptionOpen(c Candidate) bool {
+	if !c.Subscription {
 		return false
 	}
-	if a.IsZero() {
+	q, known := effectiveQuota(c)
+	return !known || q > 0
+}
+
+func lessQuota(a, b Candidate, smallFirst bool) bool {
+	aq, aok := effectiveQuota(a)
+	bq, bok := effectiveQuota(b)
+	if aok != bok {
+		return aok
+	}
+	if !aok {
 		return false
 	}
-	if b.IsZero() {
-		return true
+	if smallFirst {
+		return aq < bq
 	}
-	return a.Before(b)
+	return aq > bq
 }
 
 func pickIndex(n int, r float64) int {

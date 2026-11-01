@@ -12,6 +12,7 @@ type keySlot struct {
 func collectKeys(spec, priv map[string]any) []keySlot {
 	var out []keySlot
 	seen := map[string]bool{}
+	usedID := map[string]int{}
 	add := func(id, secret string) {
 		secret = strings.TrimSpace(secret)
 		if secret == "" || secret == "[REDACTED]" || seen[secret] {
@@ -20,6 +21,10 @@ func collectKeys(spec, priv map[string]any) []keySlot {
 		seen[secret] = true
 		if id == "" {
 			id = "key"
+		}
+		usedID[id]++
+		if usedID[id] > 1 {
+			id = id + "-" + itoa(usedID[id])
 		}
 		out = append(out, keySlot{ID: id, Secret: secret})
 	}

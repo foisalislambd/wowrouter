@@ -70,6 +70,45 @@ func TestP2CPicksTheQuieterOfTwo(t *testing.T) {
 	}
 }
 
+func TestQuotaWeightedUsesRemainingNotDeclaredWeight(t *testing.T) {
+	list := []Candidate{
+		{ID: "heavy", Weight: 100, Quota: 0.01, Healthy: true},
+		{ID: "room", Weight: 1, Quota: 50, Healthy: true},
+	}
+	hits := map[string]int{}
+	for i := 0; i < 300; i++ {
+		hits[Order("quota-weighted", list, Request{Rand: rand.Float64()}).Attempts[0]]++
+	}
+	if hits["room"] <= hits["heavy"] {
+		t.Fatalf("quota weights: %v", hits)
+	}
+}
+
+func TestSubscriptionSkipsExhaustedQuota(t *testing.T) {
+	list := []Candidate{
+		{ID: "empty", Healthy: true, Subscription: true, QuotaKnown: true, Quota: 0},
+		{ID: "unknown", Healthy: true, Subscription: true},
+		{ID: "paid", Healthy: true, Quota: 5},
+	}
+	got := Order("auto/subscription", list, Request{})
+	if len(got.Attempts) != 1 || got.Attempts[0] != "unknown" {
+		t.Fatalf("%v", got.Attempts)
+	}
+}
+
+func TestUnknownQuotaIsNotTreatedAsEmpty(t *testing.T) {
+	list := []Candidate{
+		{ID: "known", Healthy: true, Quota: 0.4},
+		{ID: "unknown", Healthy: true},
+	}
+	if Order("fill-first", list, Request{}).Attempts[0] != "known" {
+		t.Fatal(Order("fill-first", list, Request{}).Attempts)
+	}
+	if Order("headroom", list, Request{}).Attempts[0] != "known" {
+		t.Fatal(Order("headroom", list, Request{}).Attempts)
+	}
+}
+
 func TestSubscriptionFailsClosed(t *testing.T) {
 	got := Order("auto/subscription", cands(), Request{})
 	if len(got.Attempts) != 1 || got.Attempts[0] != "b" {
@@ -110,6 +149,10 @@ func TestResetAwarePrefersTheSoonerWindow(t *testing.T) {
 	list[1].Reset = now.Add(5 * time.Minute)
 	list[2].Reset = now.Add(30 * time.Minute)
 	if Order("reset-aware", list, Request{Now: now}).Attempts[0] != "b" {
+		t.Fatal(Order("reset-aware", list, Request{Now: now}).Attempts)
+	}
+	list[2].Reset = now.Add(-time.Minute)
+	if Order("reset-aware", list, Request{Now: now}).Attempts[0] != "c" {
 		t.Fatal(Order("reset-aware", list, Request{Now: now}).Attempts)
 	}
 }

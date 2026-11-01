@@ -45,6 +45,37 @@ func TestRelevanceDropsUnrelatedSentences(t *testing.T) {
 	}
 }
 
+func TestRTKKeepsAFenceInsideTheOmittedSpan(t *testing.T) {
+	var lines []string
+	for i := 0; i < 30; i++ {
+		lines = append(lines, "noise")
+	}
+	lines = append(lines, "```", "SECRET", "```")
+	for i := 0; i < 20; i++ {
+		lines = append(lines, "tail")
+	}
+	got, _ := Apply("rtk", join(lines), "")
+	if !contains(got, "SECRET") || !contains(got, "```") {
+		t.Fatalf("%s", got)
+	}
+}
+
+func TestIdenticalFencesBothSurviveDedup(t *testing.T) {
+	in := "```\nsame\n```\n\n```\nsame\n```"
+	got, _ := Apply("standard", in, "")
+	if count(got, "```") != 4 || count(got, "same") != 2 {
+		t.Fatalf("%q", got)
+	}
+}
+
+func TestNullByteIsNotAFencePlaceholder(t *testing.T) {
+	in := "keep\x00this ```code```"
+	got, _ := Apply("lite", in, "")
+	if !contains(got, "\x00") || !contains(got, "code") {
+		t.Fatalf("%q", got)
+	}
+}
+
 func TestOffIsIdentity(t *testing.T) {
 	if got, ran := Apply("off", "hello", ""); got != "hello" || ran != nil {
 		t.Fatalf("%q %v", got, ran)

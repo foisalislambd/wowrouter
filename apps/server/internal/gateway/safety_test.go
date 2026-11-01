@@ -28,6 +28,37 @@ func TestKeyScope(t *testing.T) {
 	}
 }
 
+func TestSafetyEditsEachMessage(t *testing.T) {
+	body := map[string]any{"messages": []any{
+		map[string]any{"role": "system", "content": "be brief"},
+		map[string]any{"role": "user", "content": "mail ada@example.com please"},
+	}}
+	redactMessageText(body)
+	msgs := asSlice(body["messages"])
+	if asString(asMap(msgs[0])["content"]) != "be brief" {
+		t.Fatal(asMap(msgs[0])["content"])
+	}
+	if asString(asMap(msgs[1])["content"]) != "mail [email] please" {
+		t.Fatal(asMap(msgs[1])["content"])
+	}
+	body = map[string]any{"messages": []any{
+		map[string]any{"role": "system", "content": "keep this instruction"},
+		map[string]any{"role": "user", "content": "hello   there"},
+		map[string]any{"role": "user", "content": `{"keep":"json"}`},
+	}}
+	compressMessages(body, "lite")
+	msgs = asSlice(body["messages"])
+	if asString(asMap(msgs[0])["content"]) != "keep this instruction" {
+		t.Fatal(asMap(msgs[0])["content"])
+	}
+	if asString(asMap(msgs[1])["content"]) != "hello   there" && asString(asMap(msgs[1])["content"]) != "hello there" {
+		t.Fatal(asMap(msgs[1])["content"])
+	}
+	if asString(asMap(msgs[2])["content"]) != `{"keep":"json"}` {
+		t.Fatal(asMap(msgs[2])["content"])
+	}
+}
+
 func TestHeaderScrub(t *testing.T) {
 	h := map[string]string{"Authorization": "secret", "Content-Type": "application/json", "Cookie": "a=b"}
 	scrubHeaderMap(h)

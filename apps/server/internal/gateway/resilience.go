@@ -31,6 +31,9 @@ func (b *Breakers) initLocked() {
 	if b.quota == nil {
 		b.quota = map[string]float64{}
 	}
+	if b.quotaSeen == nil {
+		b.quotaSeen = map[string]bool{}
+	}
 }
 
 func keyName(provider, id string) string { return provider + "\x00" + id }
@@ -181,16 +184,21 @@ func (b *Breakers) SetQuota(provider string, remaining float64) {
 	defer b.mu.Unlock()
 	b.initLocked()
 	b.quota[provider] = remaining
+	b.quotaSeen[provider] = true
 }
 
-// Quota is the last remaining-quota hint. Zero means unknown.
-func (b *Breakers) Quota(provider string) float64 {
-	if b == nil {
-		return 0
+// Quota reports the last remaining-quota hint. The bool is false until a
+// header or caller has stored one, so zero remaining is not "unknown".
+func (b *Breakers) Quota(provider string) (float64, bool) {
+	if b == nil || provider == "" {
+		return 0, false
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.quota[provider]
+	if b.quotaSeen == nil || !b.quotaSeen[provider] {
+		return 0, false
+	}
+	return b.quota[provider], true
 }
 
 // SnapshotAll is the in-memory breaker, cooldown, and quota view.

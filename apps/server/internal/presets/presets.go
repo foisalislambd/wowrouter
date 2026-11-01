@@ -34,6 +34,7 @@ func init() {
 	}
 	byID = make(map[string]Preset, len(all))
 	for i, p := range all {
+		p = normalize(p)
 		switch p.ID {
 		case "ollama":
 			p.BaseURL = "http://127.0.0.1:11434/v1"
@@ -63,6 +64,40 @@ func Count() int { return len(all) }
 func ByID(id string) (Preset, bool) {
 	p, ok := byID[strings.TrimSpace(id)]
 	return p, ok
+}
+
+func normalize(p Preset) Preset {
+	p.BaseURL = strings.TrimSpace(p.BaseURL)
+	lower := strings.ToLower(p.BaseURL)
+	if p.BaseURL != "" && !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		p.BaseURL = ""
+		return p
+	}
+	p.BaseURL = strings.TrimRight(p.BaseURL, "/")
+	switch strings.ToLower(p.Format) {
+	case "gemini":
+		p.BaseURL = trimSuffixFold(p.BaseURL, "/models")
+	case "claude", "anthropic":
+		p.BaseURL = trimSuffixFold(p.BaseURL, "/v1/messages")
+		p.BaseURL = trimSuffixFold(p.BaseURL, "/messages")
+	default:
+		p.BaseURL = trimSuffixFold(p.BaseURL, "/chat/completions")
+		p.BaseURL = trimSuffixFold(p.BaseURL, "/completions")
+	}
+	return p
+}
+
+func trimSuffixFold(s, suffix string) string {
+	if strings.HasSuffix(strings.ToLower(s), suffix) {
+		return strings.TrimRight(s[:len(s)-len(suffix)], "/")
+	}
+	return s
+}
+
+// HTTP reports whether the preset can be called over HTTP.
+func (p Preset) HTTP() bool {
+	u := strings.ToLower(p.BaseURL)
+	return strings.HasPrefix(u, "http://") || strings.HasPrefix(u, "https://")
 }
 
 // Search filters by id, name, or source. An empty query returns everything.

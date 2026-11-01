@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"wowrouter/server/internal/combo"
-	"wowrouter/server/internal/compress"
 )
 
 type Call struct {
@@ -126,10 +125,7 @@ func (e *Engine) Handle(call Call) Outcome {
 	out := Outcome{Status: http.StatusBadGateway, Model: call.Model}
 	text := MessageText(call.Body)
 	if safety := e.setting("safety"); safety != nil {
-		var blocked bool
-		text, blocked = guardPrompt(text, safety)
-		RewriteMessages(call.Body, text)
-		if blocked {
+		if _, blocked := guardPrompt(text, safety); blocked {
 			out.Status = http.StatusBadRequest
 			out.Blocked = true
 			out.Error = "blocked by the prompt-injection guard"
@@ -138,13 +134,15 @@ func (e *Engine) Handle(call Call) Outcome {
 			e.log(call, out, nil)
 			return out
 		}
+		if safety["pii"] == true {
+			redactMessageText(call.Body)
+			text = MessageText(call.Body)
+		}
 	}
 	if comp := e.setting("compression"); comp != nil {
 		if profile := asString(comp["profile"]); profile != "" && profile != "off" {
-			if next, _ := compress.Apply(profile, text, text); next != "" && next != text {
-				text = next
-				RewriteMessages(call.Body, text)
-			}
+			compressMessages(call.Body, profile)
+			text = MessageText(call.Body)
 		}
 	}
 	if memory := e.recall(text); memory != "" {
@@ -614,7 +612,7 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 	path, payload, headers := ToUpstream(asString(pspec["type"]), body, leaf.Upstream)
 	scrubHeaderMap(headers)
 	keyID, key := e.pickKey(leaf.Provider, pspec, ppriv)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+path, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, JoinUpstream(base, path), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, nil, err
 	}
@@ -622,7 +620,7 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 		req.Header.Set(k, v)
 	}
 	ptype := asString(pspec["type"])
-	applyProviderKey(req, ptype, key)
+	applyProviderKey(req, ptype, asString(pspec["auth_style"]), key)
 	client := *e.HTTP
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 3 {
@@ -748,8 +746,18 @@ func providerKey(spec, priv map[string]any) string {
 	return slots[0].Secret
 }
 
-func applyProviderKey(req *http.Request, ptype, key string) {
-	if key == "" {
+func applyProviderKey(req *http.Request, ptype, authStyle, key string) {
+	if key == "" || authStyle == "none" {
+		return
+	}
+	switch authStyle {
+	case "x-api-key":
+		req.Header.Set("x-api-key", key)
+		return
+	case "query":
+		q := req.URL.Query()
+		q.Set("key", key)
+		req.URL.RawQuery = q.Encode()
 		return
 	}
 	switch ptype {

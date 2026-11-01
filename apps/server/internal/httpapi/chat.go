@@ -132,7 +132,7 @@ func (s *Server) forwardKind(w http.ResponseWriter, r *http.Request, suffix stri
 	}
 	body["model"] = upstream
 	payload, _ := json.Marshal(body)
-	endpoint := strings.TrimRight(base, "/") + suffix
+	endpoint := gateway.JoinUpstream(base, suffix)
 	if err := gateway.SafeHTTPURL(endpoint); err != nil {
 		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_url")
 		return
