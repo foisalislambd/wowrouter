@@ -22,6 +22,11 @@ bench/bin/
 packages/cli/vendor/
 packages/cli/panel/
 
+# gateway console export
+apps/console/.next/
+apps/console/out/
+bootstrap-token
+
 # python
 __pycache__/
 *.py[cod]

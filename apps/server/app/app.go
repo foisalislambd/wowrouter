@@ -12,16 +12,18 @@ import (
 	"strings"
 	"time"
 
+	"airoute/server/internal/admin"
 	"airoute/server/internal/httpapi"
 	"airoute/server/internal/secret"
 	"airoute/server/internal/store"
 )
 
 type Options struct {
-	Addr    string
-	DataDir string
-	WebDir  string
-	OnReady func()
+	Addr       string
+	DataDir    string
+	WebDir     string
+	ConsoleDir string
+	OnReady    func()
 }
 
 func Run(ctx context.Context, opt Options) error {
@@ -52,10 +54,27 @@ func Run(ctx context.Context, opt Options) error {
 	defer db.Close()
 
 	webDir := FindWebDir(opt.WebDir)
+	consoleDir := FindConsoleDir(opt.ConsoleDir)
+	gatewayDB, bootstrap, err := admin.Open(filepath.Join(opt.DataDir, "gateway.db"))
+	if err != nil {
+		return err
+	}
+	defer gatewayDB.Close()
+	if os.Getenv("WOWROUTER_SAMPLE_DATA") == "1" {
+		if err := admin.SeedSample(gatewayDB); err != nil {
+			return err
+		}
+	}
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
 	api := httpapi.New(db, webDir, opt.Addr, opt.DataDir)
+	api.ConsoleDir = consoleDir
+	api.Admin = admin.New(gatewayDB, "1.1.8")
 	api.Stop = stop
+	if bootstrap != "" {
+		log.Printf("gateway console http://%s/ui/", opt.Addr)
+		log.Printf("admin token (shown once): %s", bootstrap)
+	}
 	server := &http.Server{
 		Addr:              opt.Addr,
 		Handler:           api.Handler(),
@@ -144,6 +163,15 @@ func webDirCandidates(explicit, exeDir string) []string {
 		candidates = append(candidates, filepath.Join(exeDir, "panel"))
 	}
 	return append(candidates, filepath.Join("apps", "panel", "dist"), "dist")
+}
+
+func FindConsoleDir(explicit string) string {
+	if explicit != "" {
+		if dir := pickWebDir([]string{explicit}); dir != "" {
+			return dir
+		}
+	}
+	return pickWebDir([]string{filepath.Join("apps", "console", "out")})
 }
 
 func pickWebDir(candidates []string) string {

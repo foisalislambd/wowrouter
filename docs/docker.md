@@ -17,6 +17,8 @@ docker run -d --name wowrouter \
 
 `127.0.0.1:8787:8787` means only this computer can open the panel. Inside the container the server listens on all interfaces, which is what Docker needs in order to publish the port. Do not publish it as `8787:8787` unless you want every machine on your network to reach the panel. The panel has no login.
 
+An image built from this repository's Dockerfile also serves the gateway console at `http://127.0.0.1:8787/ui/`. The first start writes `bootstrap-token` into the `/data` volume. The classic panel at `/` is unchanged. A published Hub tag includes `/ui/` only after that tag is rebuilt from this Dockerfile.
+
 From the repo, Compose builds the local source and names that image `wowrouter:local`. It does not pull the published `latest` tag. The Compose volume is `wowrouter`.
 
 ```bash

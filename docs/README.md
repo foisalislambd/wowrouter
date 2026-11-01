@@ -16,6 +16,7 @@ WowRouter runs on your computer and gives Cursor, scripts, and other tools one l
 | [Your data](your-data.md) | See where keys and logs live, and how to move them |
 | [Develop](develop.md) | Run the project from source |
 | [Benchmarks](benchmarks.md) | How the local benchmark is measured, and the latest numbers |
+| [Gateway console](gateway/getting-started.md) | Build the admin console, sign in, and call a virtual model |
 
 The two addresses you will use most:
 

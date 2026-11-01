@@ -1,3 +1,11 @@
+FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS console
+WORKDIR /src
+RUN corepack enable && corepack prepare pnpm@11.1.3 --activate
+COPY apps/console/package.json apps/console/pnpm-lock.yaml apps/console/pnpm-workspace.yaml ./
+RUN pnpm install --frozen-lockfile
+COPY apps/console ./
+RUN pnpm build
+
 FROM --platform=$BUILDPLATFORM node:22-bookworm-slim AS panel
 WORKDIR /src
 COPY package.json package-lock.json ./
@@ -22,6 +30,7 @@ RUN apk add --no-cache ca-certificates wget su-exec \
   && adduser -D -H -u 10001 wowrouter
 COPY --from=server /out/wowrouter /usr/local/bin/wowrouter
 COPY --from=panel /src/apps/panel/dist /panel
+COPY --from=console /src/out /console
 RUN ln -s wowrouter /usr/local/bin/airoute \
   && printf '%s\n' \
   '#!/bin/sh' \
@@ -37,4 +46,4 @@ VOLUME /data
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
   CMD wget -qO- http://127.0.0.1:8787/health | grep -Eq '"service":"(wowrouter|airoute)"' || exit 1
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["-addr", "0.0.0.0:8787", "-data", "/data", "-web", "/panel"]
+CMD ["-addr", "0.0.0.0:8787", "-data", "/data", "-web", "/panel", "-console", "/console"]

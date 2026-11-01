@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="234" viewBox="0 0 760 234" role="img" aria-label="CPU per request and peak memory at 5,000 requests per second" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+<title>CPU per request and peak memory at 5,000 requests per second</title>
+<text x="20" y="30" font-size="16" text-anchor="start" font-weight="600" fill="#8b949e">Resources at 5,000 requests/s (lower is better)</text>
+<text x="20" y="50" font-size="12" text-anchor="start" font-weight="400" fill="#8b949e">Same run as above: CPU time per completed request and peak resident memory of the gateway.</text>
+<text x="20" y="82" font-size="13" text-anchor="start" font-weight="600" fill="#8b949e">CPU per request</text>
+<text x="20" y="106" font-size="12" text-anchor="start" font-weight="400" fill="#8b949e">Antirion</text>
+<rect x="90" y="93" width="62.1" height="18" rx="3" fill="#22c3d6"/>
+<text x="158.10298340322453" y="106" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">247 µs</text>
+<text x="20" y="140" font-size="12" text-anchor="start" font-weight="400" fill="#8b949e">Bifrost</text>
+<rect x="90" y="127" width="180.0" height="18" rx="3" fill="#8b7cf6"/>
+<text x="276.0" y="140" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">717 µs</text>
+<text x="20" y="174" font-size="12" text-anchor="start" font-weight="400" fill="#8b949e">LiteLLM</text>
+<text x="90" y="174" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">n/a (no request completed)</text>
+<text x="390" y="82" font-size="13" text-anchor="start" font-weight="600" fill="#8b949e">Peak memory</text>
+<text x="390" y="106" font-size="12" text-anchor="start" font-weight="400" fill="#8b949e">Antirion</text>
+<rect x="460" y="93" width="20.9" height="18" rx="3" fill="#22c3d6"/>
+<text x="486.8820574728169" y="106" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">215 MiB</text>
+<text x="390" y="140" font-size="12" text-anchor="start" font-weight="400" fill="#8b949e">Bifrost</text>
+<rect x="460" y="127" width="135.1" height="18" rx="3" fill="#8b7cf6"/>
+<text x="601.1128267035862" y="140" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">1,389 MiB</text>
+<text x="390" y="174" font-size="12" text-anchor="start" font-weight="400" fill="#8b949e">LiteLLM</text>
+<rect x="460" y="161" width="180.0" height="18" rx="3" fill="#e3a33b"/>
+<text x="646.0" y="174" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">1,851 MiB</text>
+<text x="20" y="226" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">Idle memory: Antirion 41 MiB, Bifrost 498 MiB, LiteLLM 1,653 MiB</text>
+</svg>
