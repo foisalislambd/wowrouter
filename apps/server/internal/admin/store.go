@@ -492,6 +492,7 @@ func (s *Store) AddAudit(entry map[string]any) {
 	if _, ok := entry["at"]; !ok {
 		entry["at"] = nowRFC()
 	}
+	normalizeAudit(entry)
 	raw, _ := json.Marshal(entry)
 	_, _ = s.db.Exec(`INSERT INTO audit_log(id, at, payload) VALUES(?, ?, ?)`, id, asString(entry["at"]), string(raw))
 }
@@ -513,6 +514,7 @@ func (s *Store) ListAudit(limit int) []map[string]any {
 		}
 		var m map[string]any
 		if json.Unmarshal([]byte(payload), &m) == nil {
+			normalizeAudit(m)
 			out = append(out, m)
 		}
 	}
@@ -582,6 +584,7 @@ func (s *Store) Logs(from, to string, limit int) []map[string]any {
 		}
 		var m map[string]any
 		if json.Unmarshal([]byte(payload), &m) == nil {
+			normalizeLog(m)
 			out = append(out, m)
 		}
 	}
@@ -601,7 +604,56 @@ func (s *Store) LogByID(id string) (map[string]any, bool) {
 	if json.Unmarshal([]byte(payload), &m) != nil {
 		return nil, false
 	}
+	normalizeLog(m)
 	return m, true
+}
+
+// normalizeLog fills the arrays and objects the console reads on every row. A partial record
+// (an older write, or a hand-seeded sample) otherwise throws while the table renders and the
+// page goes blank.
+func normalizeLog(m map[string]any) {
+	for _, key := range []string{
+		"tags", "attempts", "guardrails", "finish_reasons", "skipped_candidates",
+		"translation_warnings", "degraded", "extensions",
+	} {
+		if asSlice(m[key]) == nil {
+			m[key] = []any{}
+		}
+	}
+	for _, key := range []string{"usage", "timing", "cache", "metadata", "cost", "params_applied"} {
+		if asMap(m[key]) == nil {
+			m[key] = map[string]any{}
+		}
+	}
+	if _, ok := m["stream"]; !ok {
+		m["stream"] = nil
+	}
+	cost := asMap(m["cost"])
+	if cost["total"] == nil && cost["usd"] != nil {
+		cost["total"] = cost["usd"]
+	}
+}
+
+// normalizeAudit fills the actor and timestamp the activity list reads. Entries written before
+// those fields existed would otherwise crash the key detail.
+func normalizeAudit(m map[string]any) {
+	if asMap(m["actor"]) == nil {
+		m["actor"] = map[string]any{"type": "token", "id": "bootstrap"}
+	}
+	if asString(m["time"]) == "" {
+		if at := asString(m["at"]); at != "" {
+			m["time"] = at
+		}
+	}
+	if asString(m["outcome"]) == "" {
+		m["outcome"] = "success"
+	}
+	action := asString(m["action"])
+	resource := asString(m["resource"])
+	if action != "" && !strings.Contains(action, ".") && !strings.Contains(action, " ") && resource != "" {
+		kind := strings.Split(resource, "/")[0]
+		m["action"] = kind + "." + action
+	}
 }
 
 func (s *Store) AddSpend(bucket string, usd float64, tokens int) float64 {

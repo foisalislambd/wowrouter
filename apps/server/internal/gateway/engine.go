@@ -868,7 +868,7 @@ func (e *Engine) log(call Call, out Outcome, hits []GuardHit) {
 		"params_applied": map[string]any{}, "cache": map[string]any{"hit": out.Cached}, "admission": nil,
 		"degraded": []any{}, "guardrails": guards, "extensions": []any{},
 		"usage":           map[string]any{"input": out.Prompt, "output": out.Output},
-		"cost":            map[string]any{"usd": fmt.Sprintf("%.6f", out.CostUSD)},
+		"cost":            map[string]any{"usd": fmt.Sprintf("%.6f", out.CostUSD), "total": fmt.Sprintf("%.6f", out.CostUSD)},
 		"timing":          map[string]any{"total_ms": out.Latency.Milliseconds()},
 		"request_headers": map[string]string{}, "response_headers": map[string]string{},
 		"content": nil, "mcp": nil, "a2a": nil, "route_path": strings.Join(out.Trail, " | "),
