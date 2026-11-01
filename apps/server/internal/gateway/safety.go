@@ -20,7 +20,6 @@ var injectionPatterns = []*regexp.Regexp{
 var (
 	emailRE = regexp.MustCompile(`[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}`)
 	ssnRE   = regexp.MustCompile(`\b\d{3}-\d{2}-\d{4}\b`)
-	cardRE  = regexp.MustCompile(`\b(?:\d{4}[ -]){3}\d{4}\b`)
 )
 
 func guardPrompt(text string, spec map[string]any) (string, bool) {
@@ -37,7 +36,7 @@ func guardPrompt(text string, spec map[string]any) (string, bool) {
 	if spec["pii"] == true {
 		text = emailRE.ReplaceAllString(text, "[email]")
 		text = ssnRE.ReplaceAllString(text, "[ssn]")
-		text = cardRE.ReplaceAllString(text, "[card]")
+		text = redactCards(text)
 	}
 	return text, false
 }
@@ -118,6 +117,68 @@ func (e *Engine) recall(text string) string {
 	return b.String()
 }
 
+// redactCards replaces 13 to 19 digit card numbers, with or without spaces
+// and hyphens. A Luhn check leaves order ids and other long numbers alone.
+func redactCards(s string) string {
+	var out strings.Builder
+	out.Grow(len(s))
+	i := 0
+	for i < len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			out.WriteByte(s[i])
+			i++
+			continue
+		}
+		j := i
+		digits := 0
+		lastSep := false
+		for j < len(s) {
+			c := s[j]
+			if c >= '0' && c <= '9' {
+				digits++
+				lastSep = false
+				j++
+				continue
+			}
+			if (c == ' ' || c == '-') && !lastSep && j+1 < len(s) && s[j+1] >= '0' && s[j+1] <= '9' {
+				lastSep = true
+				j++
+				continue
+			}
+			break
+		}
+		span := s[i:j]
+		if digits >= 13 && digits <= 19 && luhn(span) {
+			out.WriteString("[card]")
+		} else {
+			out.WriteString(span)
+		}
+		i = j
+	}
+	return out.String()
+}
+
+func luhn(span string) bool {
+	sum := 0
+	alt := false
+	for i := len(span) - 1; i >= 0; i-- {
+		c := span[i]
+		if c < '0' || c > '9' {
+			continue
+		}
+		n := int(c - '0')
+		if alt {
+			n *= 2
+			if n > 9 {
+				n -= 9
+			}
+		}
+		sum += n
+		alt = !alt
+	}
+	return sum%10 == 0
+}
+
 func memoryWords(text string) map[string]bool {
 	out := map[string]bool{}
 	for _, part := range strings.Fields(strings.ToLower(text)) {
@@ -134,7 +195,7 @@ func redactMessageText(body map[string]any) {
 	editMessageText(body, func(s string) string {
 		s = emailRE.ReplaceAllString(s, "[email]")
 		s = ssnRE.ReplaceAllString(s, "[ssn]")
-		return cardRE.ReplaceAllString(s, "[card]")
+		return redactCards(s)
 	})
 }
 

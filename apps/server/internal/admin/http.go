@@ -204,7 +204,7 @@ func (a *API) route(w http.ResponseWriter, r *http.Request, path string) {
 		a.providerPresets(w, r)
 	case strings.HasPrefix(path, "provider-presets/") && strings.HasSuffix(path, ":install") && r.Method == http.MethodPost:
 		id := strings.TrimSuffix(strings.TrimPrefix(path, "provider-presets/"), ":install")
-		a.installPreset(w, id)
+		a.installPreset(w, r, id)
 	case path == "routing/strategies" && r.Method == http.MethodGet:
 		a.routingStrategies(w)
 	case path == "runtime/quotas" && r.Method == http.MethodGet:
