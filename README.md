@@ -11,7 +11,7 @@ The router listens only on this machine, at `http://127.0.0.1:8787`. Nothing in 
 
 The panel is where you add provider keys, turn models on, and create the router key your tools will use. The API is what Cursor calls.
 
-Longer guides for install, the panel, Cursor, the desktop app, the API, and development are in [docs](docs/README.md).
+Longer guides for install, the panel, Cursor, the desktop app, the API, and development are in [docs](docs/README.md). The local benchmark is in [Benchmark](#benchmark).
 
 ## Install
 
@@ -119,6 +119,49 @@ Clients that speak the OpenAI HTTP API use the base URL above and a router key.
 A decision model does not answer `POST /v1/chat/completions`. Call `POST /v1/systemone` with a router key, a `model`, a `state`, and a `questions` object. Question types are yes/no (`noul`), a choice among options, or a score. The playground accepts the same JSON, or plain text that becomes one yes/no question.
 
 Providers whose decision API speaks System One are called directly. The Together Tev model is translated from one System One question into a short chat completion, and the chosen letter is mapped back. That path does not return a calibrated probability. Respan and Jared Palmer have no public base URL in the catalog; paste a System One base URL on the provider page before calling them.
+
+## Benchmark
+
+On one machine, WowRouter, a minimal loopback proxy, and a direct connection to the same mock each took a small OpenAI chat request. The mock answers immediately, so the wait past the direct run is the target's own time. WowRouter is measured as it ships: it checks the router key, rewrites the model id, and writes an activity log on a single SQLite connection. The loopback proxy only forwards bytes. It is a baseline that lives in this harness.
+
+The run is one shared machine, 4 CPUs, with the generator and the mock on that same machine. Bifrost and LiteLLM were not measured. The full method, the machine, and every cell are in [docs/benchmarks.md](docs/benchmarks.md). Numbers below are the medians from the run committed in `bench/results/published/`.
+
+**Simple chat at 500 requests per second**
+
+| | WowRouter | Loopback proxy | Direct |
+| --- | ---: | ---: | ---: |
+| Overhead p50 | 688 µs | 152 µs | — |
+| Overhead p99 | 1.42 ms | 207 µs | — |
+| Latency p50 | 1.47 ms | 897 µs | 776 µs |
+| Latency p99 | 2.82 ms | 1.61 ms | 1.41 ms |
+| Success | 100% | 100% | 100% |
+| CPU per request | 708 µs | 264 µs | — |
+| Peak memory | 25.5 MiB | 14.0 MiB | — |
+| Idle memory | 23.2 MiB | 8.0 MiB | — |
+
+Idle memory is the separate no-load cell. Peak memory is during this 500 requests/s run. About 8% of sends started more than 1ms late; overhead subtracts a direct run with the same kind of delay.
+
+**More of the same run**
+
+| Scenario | WowRouter | Loopback proxy | Direct |
+| --- | --- | --- | --- |
+| 64 connections | 2,006 req/s, p50 30.12 ms | 20,072 req/s, p50 3.03 ms | 62,447 req/s, p50 735 µs |
+| Highest open-loop rate with p99 overhead ≤ 5ms | 1,000 req/s | — | — |
+| 1,000 req/s, overhead p50 / p99 | 721 µs / 1.58 ms | — | p50 626 µs |
+| 5,000 req/s | p50 6.12 s, 95.38% finished | — | p50 584 µs, 100% |
+| Unknown key at 2,000 req/s, p50 / p99 | 606 µs / 1.48 ms | — | — |
+| Unknown model at 2,000 req/s, p50 / p99 | 1.05 ms / 3.88 ms | — | — |
+| Streaming at 200 req/s, time-to-first-byte overhead p50 / p99 | 422 µs / 565 µs | — | — |
+
+At 5,000 requests/s the router no longer keeps the schedule: requests queue for seconds, and in the median repetition 14,307 of 15,000 finished. The direct run at that rate still finished all of them. Past about 1,000 requests/s the wait is the single SQLite connection. CPU at 5,000 requests/s stayed near one core.
+
+**How it is measured.** Open loop, latency from the scheduled send time, three repetitions, median of each metric. The upstream is a local mock with no added delay. [docs/benchmarks.md](docs/benchmarks.md) has the cells, the pass rule for the saturation ladder, and the machine. **Reproduce it** on Linux with Go 1.26 or newer:
+
+```bash
+./bench/run.sh
+```
+
+`npm run bench` is the same command. A new run writes `bench/results/<timestamp>/`. The numbers above will not match on another machine.
 
 ## Data
 

@@ -3,4 +3,5 @@ go 1.26.5
 use (
 	./apps/desktop
 	./apps/server
+	./bench
 )

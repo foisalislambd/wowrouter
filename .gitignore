@@ -16,6 +16,7 @@ apps/desktop/data
 # go
 /bin
 coverage.out
+bench/bin/
 
 # npm package build output
 packages/cli/vendor/

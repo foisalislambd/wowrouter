@@ -68,6 +68,10 @@ node packages/cli/bin/wowrouter.js stop --addr 127.0.0.1:8793
 
 The catalog of providers is generated. Change the generator and regenerate. Do not hand-edit `apps/server/internal/catalog/catalog_generated.go`.
 
+## Benchmark
+
+`npm run bench` builds the router and runs the local benchmark. The method and the latest measured results are in [Benchmarks](benchmarks.md). `./bench/run.sh -quick` is a short smoke run.
+
 ## Tests
 
 From the repo root:
