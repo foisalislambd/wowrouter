@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"airoute/server/internal/admin"
 	"airoute/server/internal/catalog"
 	"airoute/server/internal/provider/openai"
 	"airoute/server/internal/sse"
@@ -19,12 +20,14 @@ import (
 )
 
 type Server struct {
-	Store   *Store
-	OpenAI  *openai.Client
-	WebDir  string
-	Addr    string
-	DataDir string
-	Stop    func()
+	Store      *Store
+	OpenAI     *openai.Client
+	WebDir     string
+	ConsoleDir string
+	Addr       string
+	DataDir    string
+	Stop       func()
+	Admin      *admin.API
 }
 
 // Store is the persistence surface the HTTP layer needs.
@@ -75,9 +78,23 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/playground/decision", s.playgroundDecision)
 	mux.HandleFunc("GET /v1/models", s.gatewayModels)
 	mux.HandleFunc("POST /v1/chat/completions", s.gatewayChat)
+	mux.HandleFunc("POST /v1/messages", s.gatewayAnthropic)
+	mux.HandleFunc("POST /v1beta/models/{model...}", s.gatewayGemini)
+	mux.HandleFunc("POST /model/{model}/converse", s.gatewayBedrock)
+	mux.HandleFunc("POST /mcp/{name}", s.gatewayMCP)
+	mux.HandleFunc("POST /a2a/{name}", s.gatewayA2A)
 	mux.HandleFunc("POST /v1/systemone", s.gatewayDecision)
 	mux.HandleFunc("POST /v1/images/generations", s.gatewayImages)
 	mux.HandleFunc("POST /v1/videos/generations", s.gatewayVideos)
+	if s.Admin != nil {
+		mux.Handle("/admin/v1/", s.Admin)
+		mux.HandleFunc("/scim/v2/", s.scim)
+		mux.HandleFunc("/scim/v2", s.scim)
+	}
+	mux.HandleFunc("GET /ui", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusFound)
+	})
+	mux.Handle("/ui/", s.console())
 	mux.HandleFunc("/", s.spa)
 	return mux
 }
@@ -405,6 +422,11 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (string, bool
 	}
 	id, err := s.Store.AuthenticateRouterKey(token)
 	if errors.Is(err, store.ErrNotFound) {
+		if s.Admin != nil {
+			if key, ok := s.Admin.Store.AuthenticateKey(token); ok {
+				return "gw:" + key.Name, true
+			}
+		}
 		writeOpenAIError(w, http.StatusUnauthorized, "Incorrect API key.", "authentication_error", "invalid_api_key")
 		return "", false
 	}
@@ -427,6 +449,9 @@ func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request, source, keyID
 	}
 	if err := json.Unmarshal(body, &meta); err != nil || strings.TrimSpace(meta.Model) == "" {
 		s.failChat(w, source, keyID, meta.Model, http.StatusBadRequest, "invalid_request_error", "model_required", "The model field is required.", started)
+		return
+	}
+	if s.serveVirtual(w, keyID, meta.Model, body, "openai") {
 		return
 	}
 

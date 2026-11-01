@@ -120,6 +120,10 @@ A decision model does not answer `POST /v1/chat/completions`. Call `POST /v1/sys
 
 Providers whose decision API speaks System One are called directly. The Together Tev model is translated from one System One question into a short chat completion, and the chosen letter is mapped back. That path does not return a calibrated probability. Respan and Jared Palmer have no public base URL in the catalog; paste a System One base URL on the provider page before calling them.
 
+## Gateway console
+
+The same process serves an admin console at `http://127.0.0.1:8787/ui/`. It is the gateway UI: providers, virtual models, routing, guardrails, budgets, keys, and the request log. Build it once from `apps/console` (`pnpm install` and `pnpm build`), then start the server from the repo root. The first start writes an admin token to `bootstrap-token` in the data directory. Sign in at `/ui/login/`. Virtual model names have no slash (`chat`). Names like `openai/gpt-4o-mini` stay on the existing router. Details are in [docs/gateway/getting-started.md](docs/gateway/getting-started.md).
+
 ## Benchmark
 
 On one machine, WowRouter, a minimal loopback proxy, and a direct connection to the same mock each took a small OpenAI chat request. The mock answers immediately, so the wait past the direct run is the target's own time. WowRouter is measured as it ships: it checks the router key, rewrites the model id, and writes an activity log on a single SQLite connection. The loopback proxy only forwards bytes. It is a baseline that lives in this harness.

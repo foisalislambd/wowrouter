@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="202" viewBox="0 0 760 202" role="img" aria-label="Throughput at 64 concurrent connections" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif">
+<title>Throughput at 64 concurrent connections</title>
+<text x="20" y="30" font-size="16" text-anchor="start" font-weight="600" fill="#8b949e">Throughput at 64 concurrent connections (higher is better)</text>
+<text x="20" y="50" font-size="12" text-anchor="start" font-weight="400" fill="#8b949e">Simple chat, closed loop: each connection sends its next request when the last one answers.</text>
+<text x="138" y="84" font-size="13" text-anchor="end" font-weight="600" fill="#8b949e">Antirion</text>
+<rect x="150" y="71" width="460.0" height="18" rx="3" fill="#22c3d6"/>
+<text x="616.0" y="84" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">21,512 requests/s</text>
+<text x="138" y="118" font-size="13" text-anchor="end" font-weight="600" fill="#8b949e">Bifrost</text>
+<rect x="150" y="105" width="140.4" height="18" rx="3" fill="#8b7cf6"/>
+<text x="296.44879602879604" y="118" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">6,568 requests/s</text>
+<text x="138" y="152" font-size="13" text-anchor="end" font-weight="600" fill="#8b949e">LiteLLM</text>
+<rect x="150" y="139" width="9.1" height="18" rx="3" fill="#e3a33b"/>
+<text x="165.07357555575152" y="152" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">424 requests/s</text>
+<text x="20" y="194" font-size="11" text-anchor="start" font-weight="400" fill="#8b949e">One c7i.xlarge gateway (4 vCPUs). Medians of 3 repetitions.</text>
+</svg>

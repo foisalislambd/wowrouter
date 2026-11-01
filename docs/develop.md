@@ -61,12 +61,23 @@ node packages/cli/bin/wowrouter.js stop --addr 127.0.0.1:8793
 | --- | --- |
 | `apps/server` | Go router, SQLite, HTTP API |
 | `apps/panel` | React panel |
+| `apps/console` | Gateway admin console (Next.js static export, served at `/ui/`) |
 | `apps/desktop` | Window, tray, and background agent |
 | `packages/cli` | The `wowrouter` and `airoute` npm commands |
 | `packages/sse` | Parser for OpenAI server-sent chat streams |
 | `docs` | These guides |
 
 The catalog of providers is generated. Change the generator and regenerate. Do not hand-edit `apps/server/internal/catalog/catalog_generated.go`.
+
+## Gateway console
+
+```bash
+cd apps/console
+pnpm install
+pnpm build
+```
+
+`pnpm build` writes `apps/console/out`. That folder is not committed. The Go server picks it up when you start it from the repo root, or when you pass `-console`. `WOWROUTER_SAMPLE_DATA=1` loads a local catalog with no provider secrets. Sign-in and the admin API are in [Gateway console](gateway/getting-started.md).
 
 ## Benchmark
 
