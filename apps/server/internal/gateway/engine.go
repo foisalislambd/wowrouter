@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -145,59 +147,65 @@ func (e *Engine) Handle(call Call) Outcome {
 	var lastErr string
 	retries := retryCount(modelSpec)
 	hedge := hedgeDelay(modelSpec)
-	for i, leaf := range leaves {
-		if i > 0 && hedge > 0 && i == 1 {
-			time.Sleep(hedge)
+	finish := func(leaf Leaf, status int, payload []byte) Outcome {
+		out.Status = status
+		out.Body = payload
+		out.Provider = leaf.Provider
+		out.Model = call.Model
+		out.Trail = append(out.Trail, leaf.Trail...)
+		out.Prompt, out.Output = usageOf(payload)
+		if out.Prompt == 0 {
+			out.Prompt = len(text) / 4
 		}
+		out.CostUSD = PriceUSD(leaf.PriceIn, leaf.PriceOut, out.Prompt, out.Output)
+		respText := ResponseText(payload)
+		after := Apply(guards, respText, "output")
+		if len(after.Hits) > 0 {
+			out.Flagged = true
+			in.Hits = append(in.Hits, after.Hits...)
+			if after.Blocked {
+				out.Status = http.StatusBadRequest
+				out.Blocked = true
+				out.Error = "response blocked by a guardrail"
+				out.Body = errorBody(out.Error)
+				out.Latency = e.Now().Sub(started)
+				e.charge(call, out.CostUSD, out.Prompt+out.Output)
+				e.log(call, out, in.Hits)
+				return out
+			}
+			if after.Text != "" && after.Text != respText {
+				out.Body = RewriteResponse(payload, after.Text)
+			}
+		}
+		if status < 400 {
+			e.writeCache(call, text, out.Body)
+			e.charge(call, out.CostUSD, out.Prompt+out.Output)
+		}
+		out.Latency = e.Now().Sub(started)
+		e.log(call, out, in.Hits)
+		return out
+	}
+	for i := 0; i < len(leaves); {
+		if hedge > 0 && i+1 < len(leaves) {
+			leaf, status, payload, err := e.hedged(leaves[i], leaves[i+1], call.Body, hedge, &out.Attempts)
+			if err == nil && status > 0 && status < 500 && status != http.StatusTooManyRequests {
+				return finish(leaf, status, payload)
+			}
+			lastErr = errString(err, status)
+			i += 2
+			continue
+		}
+		leaf := leaves[i]
 		for attempt := 0; attempt <= retries; attempt++ {
 			out.Attempts++
-			e.Breakers.AddInFlight(leaf.Deployment, 1)
-			status, payload, err := e.callUpstream(leaf, call.Body)
-			e.Breakers.AddInFlight(leaf.Deployment, -1)
-			ms := float64(e.Now().Sub(started).Milliseconds())
+			status, payload, err := e.one(leaf, call.Body)
 			if err != nil || status >= 500 || status == http.StatusTooManyRequests {
-				e.Breakers.Note(leaf.Deployment, ms, false)
 				lastErr = errString(err, status)
 				continue
 			}
-			e.Breakers.Note(leaf.Deployment, ms, status < 400)
-			out.Status = status
-			out.Body = payload
-			out.Provider = leaf.Provider
-			out.Model = call.Model
-			out.Trail = append(out.Trail, leaf.Trail...)
-			out.Prompt, out.Output = usageOf(payload)
-			if out.Prompt == 0 {
-				out.Prompt = len(text) / 4
-			}
-			out.CostUSD = PriceUSD(leaf.PriceIn, leaf.PriceOut, out.Prompt, out.Output)
-			respText := ResponseText(payload)
-			after := Apply(guards, respText, "output")
-			if len(after.Hits) > 0 {
-				out.Flagged = true
-				in.Hits = append(in.Hits, after.Hits...)
-				if after.Blocked {
-					out.Status = http.StatusBadRequest
-					out.Blocked = true
-					out.Error = "response blocked by a guardrail"
-					out.Body = errorBody(out.Error)
-					out.Latency = e.Now().Sub(started)
-					e.charge(call, out.CostUSD, out.Prompt+out.Output)
-					e.log(call, out, in.Hits)
-					return out
-				}
-				if after.Text != "" && after.Text != respText {
-					out.Body = RewriteResponse(payload, after.Text)
-				}
-			}
-			if status < 400 {
-				e.writeCache(call, text, out.Body)
-				e.charge(call, out.CostUSD, out.Prompt+out.Output)
-			}
-			out.Latency = e.Now().Sub(started)
-			e.log(call, out, in.Hits)
-			return out
+			return finish(leaf, status, payload)
 		}
+		i++
 	}
 	out.Status = http.StatusBadGateway
 	out.Error = lastErr
@@ -355,7 +363,93 @@ func bowMap(text string) map[string]float64 {
 	return out
 }
 
-func (e *Engine) callUpstream(leaf Leaf, body map[string]any) (int, []byte, error) {
+func (e *Engine) one(leaf Leaf, body map[string]any) (int, []byte, error) {
+	started := e.Now()
+	e.Breakers.AddInFlight(leaf.Deployment, 1)
+	status, payload, err := e.callUpstream(context.Background(), leaf, body)
+	e.Breakers.AddInFlight(leaf.Deployment, -1)
+	e.note(leaf.Deployment, float64(e.Now().Sub(started).Milliseconds()), status, err)
+	return status, payload, err
+}
+
+// hedged starts the first leaf and, after delay, the second. The first acceptable answer wins.
+func (e *Engine) hedged(a, b Leaf, body map[string]any, delay time.Duration, attempts *int) (Leaf, int, []byte, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	type result struct {
+		leaf   Leaf
+		status int
+		body   []byte
+		err    error
+	}
+	ch := make(chan result, 2)
+	launch := func(leaf Leaf) {
+		*attempts++
+		go func() {
+			started := e.Now()
+			e.Breakers.AddInFlight(leaf.Deployment, 1)
+			status, payload, err := e.callUpstream(ctx, leaf, body)
+			e.Breakers.AddInFlight(leaf.Deployment, -1)
+			if ctx.Err() != nil && (err != nil || status == 0) {
+				return
+			}
+			e.note(leaf.Deployment, float64(e.Now().Sub(started).Milliseconds()), status, err)
+			ch <- result{leaf, status, payload, err}
+		}()
+	}
+	acceptable := func(r result) bool {
+		return r.err == nil && r.status > 0 && r.status < 500 && r.status != http.StatusTooManyRequests
+	}
+	launch(a)
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	pending := 1
+	second := false
+	var last result
+	for pending > 0 {
+		select {
+		case r := <-ch:
+			pending--
+			last = r
+			if acceptable(r) {
+				cancel()
+				return r.leaf, r.status, r.body, nil
+			}
+			if !second {
+				second = true
+				pending++
+				launch(b)
+			}
+		case <-timer.C:
+			if !second {
+				second = true
+				pending++
+				launch(b)
+			}
+		}
+	}
+	if last.err != nil {
+		return a, last.status, nil, last.err
+	}
+	return a, last.status, last.body, nil
+}
+
+func (e *Engine) note(name string, ms float64, status int, err error) {
+	if err != nil && errors.Is(err, context.Canceled) {
+		return
+	}
+	if err != nil || status >= 500 || status == http.StatusTooManyRequests {
+		e.Breakers.Note(name, ms, false)
+		return
+	}
+	if status >= 400 {
+		e.Breakers.LatencyOnly(name, ms)
+		return
+	}
+	e.Breakers.Note(name, ms, true)
+}
+
+func (e *Engine) callUpstream(ctx context.Context, leaf Leaf, body map[string]any) (int, []byte, error) {
 	pspec, ppriv, ok := e.Cat.Resource("providers", leaf.Provider)
 	if !ok {
 		return 0, nil, fmt.Errorf("provider %s is not configured", leaf.Provider)
@@ -370,6 +464,9 @@ func (e *Engine) callUpstream(leaf Leaf, body map[string]any) (int, []byte, erro
 	if base == "" {
 		return 0, nil, fmt.Errorf("provider %s has no base URL", leaf.Provider)
 	}
+	if err := SafeHTTPURL(base); err != nil {
+		return 0, nil, err
+	}
 	path, payload, headers := ToUpstream(asString(pspec["type"]), body, leaf.Upstream)
 	key := asString(asMap(ppriv["auth"])["api_key"])
 	if key == "" {
@@ -378,7 +475,7 @@ func (e *Engine) callUpstream(leaf Leaf, body map[string]any) (int, []byte, erro
 	if key == "[REDACTED]" {
 		key = ""
 	}
-	req, err := http.NewRequest(http.MethodPost, strings.TrimRight(base, "/")+path, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimRight(base, "/")+path, bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, err
 	}
@@ -399,7 +496,14 @@ func (e *Engine) callUpstream(leaf Leaf, body map[string]any) (int, []byte, erro
 			req.Header.Set("Authorization", "Bearer "+key)
 		}
 	}
-	resp, err := e.HTTP.Do(req)
+	client := *e.HTTP
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return errors.New("stopped after 3 redirects")
+		}
+		return SafeHTTPURL(req.URL.String())
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return 0, nil, err
 	}

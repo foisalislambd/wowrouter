@@ -2,10 +2,13 @@ package httpapi
 
 import (
 	"bytes"
+	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"airoute/server/internal/gateway"
 	"airoute/server/internal/store"
@@ -100,6 +103,9 @@ func (s *Server) gatewayMCP(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	if _, ok := s.authorize(w, r); !ok {
+		return
+	}
 	name := r.PathValue("name")
 	res, err := s.Admin.Store.Get("mcp/servers", name)
 	if err != nil {
@@ -112,26 +118,15 @@ func (s *Server) gatewayMCP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	raw, _ := io.ReadAll(io.LimitReader(r.Body, 1<<20))
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, strings.NewReader(string(raw)))
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
-		return
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
-		return
-	}
-	defer resp.Body.Close()
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	s.proxyJSON(w, r, target, raw)
 }
 
 func (s *Server) gatewayA2A(w http.ResponseWriter, r *http.Request) {
 	if s.Admin == nil {
 		http.NotFound(w, r)
+		return
+	}
+	if _, ok := s.authorize(w, r); !ok {
 		return
 	}
 	name := r.PathValue("name")
@@ -146,13 +141,27 @@ func (s *Server) gatewayA2A(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"agent": name, "status": "configured", "echo": json.RawMessage(raw)})
 		return
 	}
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, strings.NewReader(string(raw)))
+	s.proxyJSON(w, r, target, raw)
+}
+
+func (s *Server) proxyJSON(w http.ResponseWriter, r *http.Request, target string, raw []byte) {
+	if err := gateway.SafeHTTPURL(target); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodPost, target, bytes.NewReader(raw))
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return
 	}
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return errors.New("stopped after 3 redirects")
+		}
+		return gateway.SafeHTTPURL(req.URL.String())
+	}}
+	resp, err := client.Do(req)
 	if err != nil {
 		writeJSON(w, http.StatusBadGateway, map[string]any{"error": err.Error()})
 		return
@@ -160,7 +169,7 @@ func (s *Server) gatewayA2A(w http.ResponseWriter, r *http.Request) {
 	defer resp.Body.Close()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, io.LimitReader(resp.Body, 8<<20))
 }
 
 func (s *Server) scim(w http.ResponseWriter, r *http.Request) {
@@ -177,7 +186,7 @@ func (s *Server) scim(w http.ResponseWriter, r *http.Request) {
 			want = str(asMap(settings.Private["scim"])["bearer_token"])
 		}
 	}
-	if want == "" || token != want {
+	if want == "" || !secretEqual(token, want) {
 		w.Header().Set("Content-Type", "application/scim+json")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"detail":"SCIM token required"}`))
@@ -215,6 +224,13 @@ func (s *Server) scim(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusNotFound, map[string]any{"detail": "unsupported SCIM path"})
+}
+
+func secretEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 func scimUser(name string, spec map[string]any) map[string]any {

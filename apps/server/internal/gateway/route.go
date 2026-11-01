@@ -96,9 +96,17 @@ func Plan(node map[string]any, cat Reader, facts Facts) (leaves []Leaf, blocked 
 		return Plan(asMap(spec["tree"]), cat, facts)
 	case "fallback":
 		var out []Leaf
+		sawBlock := false
 		for _, child := range asSlice(node["children"]) {
-			got, _ := Plan(asMap(child), cat, facts)
+			got, blockedChild := Plan(asMap(child), cat, facts)
+			if blockedChild {
+				sawBlock = true
+				continue
+			}
 			out = append(out, got...)
+		}
+		if len(out) == 0 && sawBlock {
+			return nil, true
 		}
 		return out, false
 	case "weighted", "pool":
@@ -187,12 +195,16 @@ func leafFromDeployment(name string, cat Reader, facts Facts) (Leaf, bool) {
 		return Leaf{}, false
 	}
 	spec, _, ok := cat.Resource("deployments", name)
-	if !ok {
+	if !ok || spec["enabled"] == false {
+		return Leaf{}, false
+	}
+	provider := asString(spec["provider"])
+	if pspec, _, ok := cat.Resource("providers", provider); ok && pspec["enabled"] == false {
 		return Leaf{}, false
 	}
 	price := asMap(spec["price"])
 	return Leaf{
-		Provider:   asString(spec["provider"]),
+		Provider:   provider,
 		Deployment: name,
 		Upstream:   asString(spec["model"]),
 		PriceIn:    asFloat(price["input"]),
@@ -258,7 +270,14 @@ func matchWhen(when map[string]any, facts Facts) bool {
 		return strings.Contains(strings.ToLower(value), strings.ToLower(asString(contains)))
 	}
 	if _, ok := when["gt"]; ok {
-		return float64(facts.InputTokens) > asFloat(when["gt"]) || (field == "request.text_length" && float64(len(facts.Text)) > asFloat(when["gt"]))
+		n := asFloat(value)
+		switch field {
+		case "request.text_length":
+			n = float64(len(facts.Text))
+		case "request.input_tokens", "":
+			n = float64(facts.InputTokens)
+		}
+		return n > asFloat(when["gt"])
 	}
 	return false
 }
@@ -333,6 +352,19 @@ func (b *Breakers) Allow(name string) bool {
 		return true
 	}
 	return false
+}
+
+func (b *Breakers) LatencyOnly(name string, ms float64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	br := b.get(name)
+	if ms > 0 {
+		if br.ewma == 0 {
+			br.ewma = ms
+		} else {
+			br.ewma = br.ewma*0.8 + ms*0.2
+		}
+	}
 }
 
 func (b *Breakers) Note(name string, ms float64, ok bool) {

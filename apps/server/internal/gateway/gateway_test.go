@@ -174,3 +174,117 @@ func TestWeightedIsStableForRoll(t *testing.T) {
 		t.Fatalf("got %s", leaves[0].Deployment)
 	}
 }
+
+func TestDisabledDeploymentAndBlock(t *testing.T) {
+	cat := mem{docs: map[string]Named{
+		"deployments/off":  {Name: "off", Spec: map[string]any{"provider": "openai", "model": "m", "enabled": false}},
+		"deployments/on":   {Name: "on", Spec: map[string]any{"provider": "openai", "model": "m", "enabled": true}},
+		"providers/openai": {Name: "openai", Spec: map[string]any{"enabled": false}},
+	}}
+	leaves, blocked := Plan(map[string]any{"type": "deployment", "deployment": "off"}, cat, Facts{})
+	if blocked || len(leaves) != 0 {
+		t.Fatalf("disabled leaf leaves=%+v blocked=%v", leaves, blocked)
+	}
+	leaves, _ = Plan(map[string]any{"type": "deployment", "deployment": "on"}, cat, Facts{})
+	if len(leaves) != 0 {
+		t.Fatalf("disabled provider still planned %+v", leaves)
+	}
+	onlyBlock, blocked := Plan(map[string]any{"type": "fallback", "children": []any{
+		map[string]any{"type": "block"},
+	}}, cat, Facts{})
+	if !blocked || len(onlyBlock) != 0 {
+		t.Fatalf("block fallback leaves=%+v blocked=%v", onlyBlock, blocked)
+	}
+}
+
+func TestConditionalLengthUsesTheField(t *testing.T) {
+	when := map[string]any{"field": "request.text_length", "gt": 10}
+	if matchWhen(when, Facts{Text: "short", InputTokens: 100}) {
+		t.Fatal("token estimate matched a text-length rule")
+	}
+	if !matchWhen(when, Facts{Text: "this is long enough", InputTokens: 0}) {
+		t.Fatal("long text did not match")
+	}
+}
+
+func TestSafeURLAndAzurePath(t *testing.T) {
+	if err := SafeHTTPURL("http://example.com/v1"); err == nil {
+		t.Fatal("public http URL accepted")
+	}
+	if err := SafeHTTPURL("http://127.0.0.1:9/v1"); err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{"model": "chat", "stream": true, "messages": []any{
+		map[string]any{"role": "system", "content": "a"},
+		map[string]any{"role": "system", "content": "b"},
+		map[string]any{"role": "user", "content": "hi"},
+	}}
+	path, payload, _ := ToUpstream("azure_openai", body, "my deploy")
+	if !strings.Contains(path, "/openai/deployments/my%20deploy/chat/completions") {
+		t.Fatalf("path %s", path)
+	}
+	if strings.Contains(string(payload), `"stream"`) {
+		t.Fatalf("stream forwarded: %s", payload)
+	}
+	_, anth, _ := ToUpstream("anthropic", body, "claude")
+	if !strings.Contains(string(anth), `"system":"a\nb"`) && !strings.Contains(string(anth), `"system":"a\\nb"`) {
+		t.Fatalf("system %s", anth)
+	}
+}
+
+func TestHedgeDoesNotWaitForTheSlowLeaf(t *testing.T) {
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(400 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"slow"}}]}`))
+	}))
+	defer slow.Close()
+	fast := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"fast"}}]}`))
+	}))
+	defer fast.Close()
+	provider := func(name, base string) Named {
+		return Named{Name: name, Spec: map[string]any{"type": "openai_compatible", "base_url": base, "enabled": true}, Private: map[string]any{"type": "openai_compatible", "base_url": base, "auth": map[string]any{"api_key": "k"}}}
+	}
+	cat := &ledger{mem: mem{docs: map[string]Named{
+		"models/chat": {Name: "chat", Spec: map[string]any{
+			"enabled":  true,
+			"policies": map[string]any{"resilience": map[string]any{"hedging": map[string]any{"enabled": true, "delay": "30ms"}}},
+			"target": map[string]any{"type": "fallback", "children": []any{
+				map[string]any{"type": "deployment", "deployment": "slow"},
+				map[string]any{"type": "deployment", "deployment": "fast"},
+			}},
+		}},
+		"deployments/slow": {Name: "slow", Spec: map[string]any{"provider": "slowp", "model": "m", "enabled": true}},
+		"deployments/fast": {Name: "fast", Spec: map[string]any{"provider": "fastp", "model": "m", "enabled": true}},
+		"providers/slowp":  provider("slowp", slow.URL),
+		"providers/fastp":  provider("fastp", fast.URL),
+	}}, cache: map[string]string{}}
+	eng := New(cat)
+	started := time.Now()
+	out := eng.Handle(Call{Model: "chat", Body: map[string]any{"model": "chat", "messages": []any{map[string]any{"role": "user", "content": "hi"}}}})
+	elapsed := time.Since(started)
+	if out.Status != 200 || !strings.Contains(string(out.Body), "fast") {
+		t.Fatalf("status %d body %s err %s", out.Status, out.Body, out.Error)
+	}
+	if elapsed > 300*time.Millisecond {
+		t.Fatalf("hedge waited %s", elapsed)
+	}
+}
+
+func TestClientErrorsDoNotOpenTheBreaker(t *testing.T) {
+	b := NewBreakers()
+	for i := 0; i < 8; i++ {
+		b.LatencyOnly("dep", 3)
+	}
+	state, failures, _ := b.Snapshot("dep")
+	if state != "closed" || failures != 0 {
+		t.Fatalf("state %s failures %d", state, failures)
+	}
+	for i := 0; i < 5; i++ {
+		b.Note("dep", 3, false)
+	}
+	state, _, _ = b.Snapshot("dep")
+	if state != "open" {
+		t.Fatalf("state %s", state)
+	}
+}

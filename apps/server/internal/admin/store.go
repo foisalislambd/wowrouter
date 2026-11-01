@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -176,7 +177,14 @@ func (s *Store) BootstrapMatches(token string) bool {
 	if err != nil || hash == "" || token == "" {
 		return false
 	}
-	return hash == shaHex(strings.TrimSpace(token))
+	return hashEqual(hash, shaHex(strings.TrimSpace(token)))
+}
+
+func hashEqual(a, b string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
 func (s *Store) ensureTenancy() error {
@@ -311,6 +319,9 @@ func (s *Store) Put(collection, name string, spec map[string]any, ifMatch string
 	if exists {
 		created = prev.CreatedAt
 	}
+	if publicAny != nil {
+		delete(publicAny, "secret_sha256")
+	}
 	pub, _ := json.Marshal(publicAny)
 	priv, _ := json.Marshal(full)
 	_, err = s.db.Exec(`INSERT INTO resources(collection, name, spec, private, etag, generation, created_at, updated_at, managed_by)
@@ -398,12 +409,15 @@ func (s *Store) AuthenticateKey(token string) (Resource, bool) {
 	if err != nil {
 		return Resource{}, false
 	}
+	var found Resource
+	ok := false
 	for _, key := range list {
-		if asString(key.Private["secret_sha256"]) == hash && key.Private["enabled"] != false && key.Spec["enabled"] != false {
-			return key, true
+		if hashEqual(asString(key.Private["secret_sha256"]), hash) && key.Private["enabled"] != false && key.Spec["enabled"] != false {
+			found = key
+			ok = true
 		}
 	}
-	return Resource{}, false
+	return found, ok
 }
 
 func (s *Store) CreateSession() (string, error) {
@@ -484,8 +498,11 @@ func (s *Store) AddLog(rec map[string]any) {
 }
 
 func (s *Store) Logs(from, to string, limit int) []map[string]any {
-	if limit <= 0 || limit > 500 {
+	if limit <= 0 {
 		limit = 100
+	}
+	if limit > 5000 {
+		limit = 5000
 	}
 	q := `SELECT payload FROM request_logs WHERE 1=1`
 	args := []any{}
@@ -556,7 +573,11 @@ func (s *Store) AllowRate(bucket string, limit int, window time.Duration) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	start := time.Now().Unix() / int64(window.Seconds())
+	windowSec := int64(window / time.Second)
+	if windowSec < 1 {
+		windowSec = 1
+	}
+	start := time.Now().Unix() / windowSec
 	var stored int64
 	var count int
 	err := s.db.QueryRow(`SELECT window_start, count FROM rate_windows WHERE bucket = ?`, bucket).Scan(&stored, &count)
@@ -728,7 +749,9 @@ func (s *Store) ConfigDocument() map[string]any {
 		}
 		bucket := map[string]any{}
 		for _, res := range list {
-			bucket[res.Name] = res.Spec
+			spec := cloneMap(res.Spec)
+			delete(spec, "secret_sha256")
+			bucket[res.Name] = spec
 		}
 		doc[col] = bucket
 	}

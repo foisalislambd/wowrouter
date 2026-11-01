@@ -831,9 +831,13 @@ func (a *API) providerTest(w http.ResponseWriter, r *http.Request, name string) 
 	var body map[string]any
 	_ = readBody(r, &body)
 	spec := asMap(body["spec"])
-	if spec == nil && name != "" {
+	if name != "" {
 		if res, err := a.Store.Get("providers", name); err == nil {
-			spec = res.Private
+			if spec == nil {
+				spec = res.Private
+			} else if kept, ok := keepSecrets(res.Private, spec).(map[string]any); ok {
+				spec = kept
+			}
 		}
 	}
 	base := asString(spec["base_url"])
@@ -844,6 +848,11 @@ func (a *API) providerTest(w http.ResponseWriter, r *http.Request, name string) 
 	result := map[string]any{"ok": false, "method": "list_models", "status_code": nil, "latency_ms": 0, "error": nil, "models": nil, "tested_at": nowRFC()}
 	if base == "" {
 		result["error"] = "no base URL"
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	if err := gateway.SafeHTTPURL(base); err != nil {
+		result["error"] = err.Error()
 		writeJSON(w, http.StatusOK, result)
 		return
 	}
@@ -971,7 +980,9 @@ func represent(res Resource) map[string]any {
 	if hint := asString(res.Private["secret_hint"]); hint != "" {
 		meta["hint"] = hint
 	}
-	return map[string]any{"name": res.Name, "spec": res.Spec, "metadata": meta}
+	spec := cloneMap(res.Spec)
+	delete(spec, "secret_sha256")
+	return map[string]any{"name": res.Name, "spec": spec, "metadata": meta}
 }
 
 func resourceMeta(res Resource) map[string]any {

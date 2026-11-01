@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 )
 
@@ -131,6 +132,8 @@ func bedrockMessages(body map[string]any) []any {
 	return out
 }
 
+func urlEscape(s string) string { return url.PathEscape(s) }
+
 func firstNonEmpty(values ...string) string {
 	for _, v := range values {
 		if strings.TrimSpace(v) != "" {
@@ -143,6 +146,8 @@ func firstNonEmpty(values ...string) string {
 // ToUpstream rewrites an OpenAI chat body for a provider type.
 func ToUpstream(providerType string, body map[string]any, upstreamModel string) (path string, payload []byte, headers map[string]string) {
 	body = cloneMap(body)
+	// The data plane reads a full JSON completion so guardrails and usage see the answer.
+	delete(body, "stream")
 	body["model"] = upstreamModel
 	headers = map[string]string{"Content-Type": "application/json", "Accept": "application/json"}
 	switch providerType {
@@ -155,17 +160,28 @@ func ToUpstream(providerType string, body map[string]any, upstreamModel string) 
 			anth["max_tokens"] = body["max_tokens"]
 		}
 		var msgs []any
+		var system string
 		for _, item := range asSlice(body["messages"]) {
 			m := asMap(item)
 			if asString(m["role"]) == "system" {
-				anth["system"] = asString(m["content"])
+				if system != "" {
+					system += "\n"
+				}
+				system += asString(m["content"])
 				continue
 			}
 			msgs = append(msgs, map[string]any{"role": asString(m["role"]), "content": asString(m["content"])})
 		}
+		if system != "" {
+			anth["system"] = system
+		}
 		anth["messages"] = msgs
 		payload, _ = json.Marshal(anth)
 		headers["anthropic-version"] = "2023-06-01"
+		return path, payload, headers
+	case "azure", "azure_openai":
+		path = "/openai/deployments/" + urlEscape(upstreamModel) + "/chat/completions?api-version=2024-10-21"
+		payload, _ = json.Marshal(body)
 		return path, payload, headers
 	case "gemini":
 		path = "/models/" + upstreamModel + ":generateContent"
