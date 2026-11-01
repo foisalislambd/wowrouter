@@ -46,6 +46,11 @@ var secretPatterns = map[string]*regexp.Regexp{
 
 // Apply runs enabled guardrails over text. Order follows each spec's order field.
 func Apply(rules []Named, text, stage string) GuardOutcome {
+	return ApplyCall(rules, text, stage, nil)
+}
+
+// ApplyCall is Apply with the original request, so a JSON Schema guard can use the request schema.
+func ApplyCall(rules []Named, text, stage string, req map[string]any) GuardOutcome {
 	out := GuardOutcome{Text: text}
 	sorted := append([]Named(nil), rules...)
 	for i := 1; i < len(sorted); i++ {
@@ -80,8 +85,10 @@ func Apply(rules []Named, text, stage string) GuardOutcome {
 		case "secrets":
 			next, hits = patterns(rule.Name, action, out.Text, secretWanted(asMap(spec["secrets"])), "secret")
 		case "json_schema":
-			if stage == "output" && !jsonOK(out.Text) {
-				hits = []GuardHit{{Name: rule.Name, Action: action, Category: "schema_violation", Detail: "response is not JSON"}}
+			if stage == "output" {
+				if err := checkJSONSchema(spec, out.Text, req); err != nil {
+					hits = []GuardHit{{Name: rule.Name, Action: action, Category: "schema_violation", Detail: err.Error()}}
+				}
 			}
 		case "tool_permission":
 			hits = toolDenied(rule.Name, action, out.Text, asMap(spec["tool_permission"]))

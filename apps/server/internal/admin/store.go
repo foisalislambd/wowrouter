@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"airoute/server/internal/gateway"
+	"wowrouter/server/internal/gateway"
 
 	_ "modernc.org/sqlite"
 )
@@ -35,9 +35,32 @@ type Resource struct {
 }
 
 type Store struct {
-	db  *sql.DB
-	mu  sync.Mutex
-	gen int64
+	db          *sql.DB
+	mu          sync.Mutex
+	gen         int64
+	snap        *snapshot
+	logs        chan logItem
+	logDone     chan struct{}
+	cacheMu     sync.Mutex
+	cacheExact  map[string]string
+	cacheLoaded bool
+}
+
+type snapshot struct {
+	gen    int64
+	cols   map[string]map[string]Resource
+	hashes map[string]string
+}
+
+type logItem struct {
+	rec   map[string]any
+	cache *cacheWrite
+	flush chan struct{}
+}
+
+type cacheWrite struct {
+	key, model, prompt, response, vector string
+	exact                                bool
 }
 
 func Open(path string) (*Store, string, error) {
@@ -67,10 +90,22 @@ func Open(path string) (*Store, string, error) {
 		db.Close()
 		return nil, "", err
 	}
+	s.cacheExact = map[string]string{}
+	s.loadCache()
+	s.logs = make(chan logItem, 256)
+	s.logDone = make(chan struct{})
+	go s.logger()
 	return s, token, nil
 }
 
-func (s *Store) Close() error { return s.db.Close() }
+func (s *Store) Close() error {
+	if s.logs != nil {
+		close(s.logs)
+		<-s.logDone
+		s.logs = nil
+	}
+	return s.db.Close()
+}
 
 func sqliteDSN(path string) (string, error) {
 	abs, err := filepath.Abs(path)
@@ -78,7 +113,7 @@ func sqliteDSN(path string) (string, error) {
 		return "", err
 	}
 	u := url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(abs)}
-	return u.String() + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)", nil
+	return u.String() + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=cache_size(-2000)", nil
 }
 
 func (s *Store) migrate() error {
@@ -341,6 +376,10 @@ func (s *Store) Put(collection, name string, spec map[string]any, ifMatch string
 
 func (s *Store) prepareKey(name string, full map[string]any, prev *Resource, exists bool) error {
 	secret := asString(full["secret"])
+	if (secret == "" || secret == "[REDACTED]") && asString(full["secret_sha256"]) != "" && !exists {
+		delete(full, "secret")
+		return nil
+	}
 	if secret == "" || secret == "[REDACTED]" {
 		if exists && asString(prev.Private["secret_sha256"]) != "" {
 			delete(full, "secret")
@@ -381,43 +420,40 @@ func (s *Store) Delete(collection, name, ifMatch string) error {
 }
 
 func (s *Store) Resource(collection, name string) (map[string]any, map[string]any, bool) {
-	res, err := s.Get(collection, name)
-	if err != nil {
+	view := s.view()
+	res, ok := view.cols[collection][name]
+	if !ok {
 		return nil, nil, false
 	}
 	return res.Spec, res.Private, true
 }
 
 func (s *Store) Resources(collection string) []gateway.Named {
-	list, err := s.List(collection)
-	if err != nil {
-		return nil
-	}
-	out := make([]gateway.Named, 0, len(list))
-	for _, res := range list {
+	view := s.view()
+	col := view.cols[collection]
+	out := make([]gateway.Named, 0, len(col))
+	for _, res := range col {
 		out = append(out, gateway.Named{Name: res.Name, Spec: res.Spec, Private: res.Private})
 	}
 	return out
 }
 
 func (s *Store) AuthenticateKey(token string) (Resource, bool) {
-	if !strings.HasPrefix(token, "sk-wowrouter-") {
+	token = strings.TrimSpace(token)
+	if token == "" || !strings.HasPrefix(token, "sk-wowrouter-") {
 		return Resource{}, false
 	}
 	hash := shaHex(token)
-	list, err := s.List("keys")
-	if err != nil {
+	view := s.view()
+	name, ok := view.hashes[hash]
+	if !ok {
 		return Resource{}, false
 	}
-	var found Resource
-	ok := false
-	for _, key := range list {
-		if hashEqual(asString(key.Private["secret_sha256"]), hash) && key.Private["enabled"] != false && key.Spec["enabled"] != false {
-			found = key
-			ok = true
-		}
+	key, ok := view.cols["keys"][name]
+	if !ok || key.Private["enabled"] == false || key.Spec["enabled"] == false {
+		return Resource{}, false
 	}
-	return found, ok
+	return key, true
 }
 
 func (s *Store) CreateSession() (string, error) {
@@ -456,6 +492,7 @@ func (s *Store) AddAudit(entry map[string]any) {
 	if _, ok := entry["at"]; !ok {
 		entry["at"] = nowRFC()
 	}
+	normalizeAudit(entry)
 	raw, _ := json.Marshal(entry)
 	_, _ = s.db.Exec(`INSERT INTO audit_log(id, at, payload) VALUES(?, ?, ?)`, id, asString(entry["at"]), string(raw))
 }
@@ -477,6 +514,7 @@ func (s *Store) ListAudit(limit int) []map[string]any {
 		}
 		var m map[string]any
 		if json.Unmarshal([]byte(payload), &m) == nil {
+			normalizeAudit(m)
 			out = append(out, m)
 		}
 	}
@@ -487,17 +525,34 @@ func (s *Store) ListAudit(limit int) []map[string]any {
 }
 
 func (s *Store) AddLog(rec map[string]any) {
-	id := asString(rec["id"])
-	if id == "" {
-		id, _ = randomToken("req_", 10)
-		rec["id"] = id
+	if s.logs == nil {
+		s.writeLog(rec)
+		return
 	}
-	raw, _ := json.Marshal(rec)
-	_, _ = s.db.Exec(`INSERT OR REPLACE INTO request_logs(id, started_at, model, key_name, provider, status_code, payload) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-		id, asString(rec["started_at"]), asString(rec["model"]), asString(rec["key"]), asString(rec["provider"]), int(asFloat(rec["status_code"])), string(raw))
+	select {
+	case s.logs <- logItem{rec: rec}:
+	default:
+	}
+}
+
+func (s *Store) FlushLogs() {
+	if s.logs == nil {
+		return
+	}
+	done := make(chan struct{})
+	s.logs <- logItem{flush: done}
+	<-done
+}
+
+func (s *Store) ClearLogs() {
+	s.FlushLogs()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	_, _ = s.db.Exec(`DELETE FROM request_logs`)
 }
 
 func (s *Store) Logs(from, to string, limit int) []map[string]any {
+	s.FlushLogs()
 	if limit <= 0 {
 		limit = 100
 	}
@@ -529,6 +584,7 @@ func (s *Store) Logs(from, to string, limit int) []map[string]any {
 		}
 		var m map[string]any
 		if json.Unmarshal([]byte(payload), &m) == nil {
+			normalizeLog(m)
 			out = append(out, m)
 		}
 	}
@@ -548,7 +604,56 @@ func (s *Store) LogByID(id string) (map[string]any, bool) {
 	if json.Unmarshal([]byte(payload), &m) != nil {
 		return nil, false
 	}
+	normalizeLog(m)
 	return m, true
+}
+
+// normalizeLog fills the arrays and objects the console reads on every row. A partial record
+// (an older write, or a hand-seeded sample) otherwise throws while the table renders and the
+// page goes blank.
+func normalizeLog(m map[string]any) {
+	for _, key := range []string{
+		"tags", "attempts", "guardrails", "finish_reasons", "skipped_candidates",
+		"translation_warnings", "degraded", "extensions",
+	} {
+		if asSlice(m[key]) == nil {
+			m[key] = []any{}
+		}
+	}
+	for _, key := range []string{"usage", "timing", "cache", "metadata", "cost", "params_applied"} {
+		if asMap(m[key]) == nil {
+			m[key] = map[string]any{}
+		}
+	}
+	if _, ok := m["stream"]; !ok {
+		m["stream"] = nil
+	}
+	cost := asMap(m["cost"])
+	if cost["total"] == nil && cost["usd"] != nil {
+		cost["total"] = cost["usd"]
+	}
+}
+
+// normalizeAudit fills the actor and timestamp the activity list reads. Entries written before
+// those fields existed would otherwise crash the key detail.
+func normalizeAudit(m map[string]any) {
+	if asMap(m["actor"]) == nil {
+		m["actor"] = map[string]any{"type": "token", "id": "bootstrap"}
+	}
+	if asString(m["time"]) == "" {
+		if at := asString(m["at"]); at != "" {
+			m["time"] = at
+		}
+	}
+	if asString(m["outcome"]) == "" {
+		m["outcome"] = "success"
+	}
+	action := asString(m["action"])
+	resource := asString(m["resource"])
+	if action != "" && !strings.Contains(action, ".") && !strings.Contains(action, " ") && resource != "" {
+		kind := strings.Split(resource, "/")[0]
+		m["action"] = kind + "." + action
+	}
 }
 
 func (s *Store) AddSpend(bucket string, usd float64, tokens int) float64 {
@@ -593,23 +698,33 @@ func (s *Store) AllowRate(bucket string, limit int, window time.Duration) bool {
 }
 
 func (s *Store) CacheGet(key string) (string, bool) {
-	var response string
-	err := s.db.QueryRow(`SELECT response FROM cache_entries WHERE key = ? AND exact = 1`, key).Scan(&response)
-	if err != nil {
-		return "", false
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	if !s.cacheLoaded {
+		s.loadCacheLocked()
 	}
-	_, _ = s.db.Exec(`UPDATE cache_entries SET hits = hits + 1 WHERE key = ?`, key)
-	return response, true
+	response, ok := s.cacheExact[key]
+	return response, ok
 }
 
 func (s *Store) CachePut(key, model, prompt, response, vector string, exact bool) {
-	flag := 0
 	if exact {
-		flag = 1
+		s.cacheMu.Lock()
+		if s.cacheExact == nil {
+			s.cacheExact = map[string]string{}
+		}
+		s.cacheExact[key] = response
+		s.cacheLoaded = true
+		s.cacheMu.Unlock()
 	}
-	_, _ = s.db.Exec(`INSERT INTO cache_entries(key, model, exact, vector, prompt, response, created_at, hits) VALUES(?, ?, ?, ?, ?, ?, ?, 0)
-		ON CONFLICT(key) DO UPDATE SET response = excluded.response, vector = excluded.vector, prompt = excluded.prompt, created_at = excluded.created_at`,
-		key, model, flag, vector, prompt, response, nowRFC())
+	if s.logs == nil {
+		s.writeCache(cacheWrite{key, model, prompt, response, vector, exact})
+		return
+	}
+	select {
+	case s.logs <- logItem{cache: &cacheWrite{key, model, prompt, response, vector, exact}}:
+	default:
+	}
 }
 
 func (s *Store) CacheSemantic(model, prompt string, threshold float64) (string, float64, bool) {
@@ -756,4 +871,109 @@ func (s *Store) ConfigDocument() map[string]any {
 		doc[col] = bucket
 	}
 	return doc
+}
+
+func (s *Store) view() *snapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snap != nil && s.snap.gen == s.gen {
+		return s.snap
+	}
+	snap := &snapshot{gen: s.gen, cols: map[string]map[string]Resource{}, hashes: map[string]string{}}
+	rows, err := s.db.Query(`SELECT collection, name, spec, private, etag, generation, created_at, updated_at, managed_by FROM resources`)
+	if err != nil {
+		s.snap = snap
+		return snap
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var collection string
+		var res Resource
+		var spec, private string
+		if err := rows.Scan(&collection, &res.Name, &spec, &private, &res.ETag, &res.Generation, &res.CreatedAt, &res.UpdatedAt, &res.ManagedBy); err != nil {
+			continue
+		}
+		res.Spec = map[string]any{}
+		res.Private = map[string]any{}
+		_ = json.Unmarshal([]byte(spec), &res.Spec)
+		_ = json.Unmarshal([]byte(private), &res.Private)
+		if res.Spec == nil {
+			res.Spec = map[string]any{}
+		}
+		if res.Private == nil {
+			res.Private = map[string]any{}
+		}
+		if snap.cols[collection] == nil {
+			snap.cols[collection] = map[string]Resource{}
+		}
+		snap.cols[collection][res.Name] = res
+		if collection == "keys" {
+			if hash := asString(res.Private["secret_sha256"]); hash != "" {
+				snap.hashes[hash] = res.Name
+			}
+		}
+	}
+	s.snap = snap
+	return snap
+}
+
+func (s *Store) logger() {
+	defer close(s.logDone)
+	for item := range s.logs {
+		if item.rec != nil {
+			s.writeLog(item.rec)
+		}
+		if item.cache != nil {
+			s.writeCache(*item.cache)
+		}
+		if item.flush != nil {
+			close(item.flush)
+		}
+	}
+}
+
+func (s *Store) writeLog(rec map[string]any) {
+	id := asString(rec["id"])
+	if id == "" {
+		id, _ = randomToken("req_", 10)
+		rec["id"] = id
+	}
+	raw, _ := json.Marshal(rec)
+	_, _ = s.db.Exec(`INSERT OR REPLACE INTO request_logs(id, started_at, model, key_name, provider, status_code, payload) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+		id, asString(rec["started_at"]), asString(rec["model"]), asString(rec["key"]), asString(rec["provider"]), int(asFloat(rec["status_code"])), string(raw))
+}
+
+func (s *Store) writeCache(item cacheWrite) {
+	flag := 0
+	if item.exact {
+		flag = 1
+	}
+	_, _ = s.db.Exec(`INSERT INTO cache_entries(key, model, exact, vector, prompt, response, created_at, hits) VALUES(?, ?, ?, ?, ?, ?, ?, 0)
+		ON CONFLICT(key) DO UPDATE SET response = excluded.response, vector = excluded.vector, prompt = excluded.prompt, created_at = excluded.created_at`,
+		item.key, item.model, flag, item.vector, item.prompt, item.response, nowRFC())
+}
+
+func (s *Store) loadCache() {
+	s.cacheMu.Lock()
+	defer s.cacheMu.Unlock()
+	s.loadCacheLocked()
+}
+
+func (s *Store) loadCacheLocked() {
+	if s.cacheExact == nil {
+		s.cacheExact = map[string]string{}
+	}
+	rows, err := s.db.Query(`SELECT key, response FROM cache_entries WHERE exact = 1`)
+	if err != nil {
+		s.cacheLoaded = true
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, response string
+		if rows.Scan(&key, &response) == nil {
+			s.cacheExact[key] = response
+		}
+	}
+	s.cacheLoaded = true
 }

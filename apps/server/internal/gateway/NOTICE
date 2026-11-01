@@ -1,0 +1,11 @@
+This package is derived from Antirion and was modified for WowRouter.
+
+Antirion
+https://github.com/eliasbiondo/antirion
+Copyright 2026 Elias Biondo
+Licensed under the Apache License, Version 2.0.
+The license text is in LICENSES/Apache-2.0.txt at the repository root.
+
+Modifications include streaming chat that keeps stream:true for
+OpenAI-compatible providers, JSON Schema checking for guardrails, and reading
+more than one provider API key.

@@ -173,23 +173,31 @@ func waitHealthy(url string, timeout time.Duration, proc *childProc) error {
 	return last
 }
 
-func configureGateway(mockBase string) (string, error) {
+func configureGateway(dataDir, mockBase string) (string, error) {
+	raw, err := os.ReadFile(filepath.Join(dataDir, "bootstrap-token"))
+	if err != nil {
+		return "", fmt.Errorf("bootstrap token: %w", err)
+	}
+	token := strings.TrimSpace(string(raw))
 	base := "http://" + gatewayAddr
 	body := map[string]any{
 		"apiKey":  upstreamKey,
 		"baseUrl": mockBase + "/v1",
 		"enabled": true,
 	}
-	if err := apiJSON(http.MethodPut, base+"/api/providers/openai", body, nil); err != nil {
+	if err := apiJSON(http.MethodPut, base+"/api/providers/openai", body, nil, token); err != nil {
 		return "", fmt.Errorf("save openai provider: %w", err)
 	}
-	if err := apiJSON(http.MethodPut, base+"/api/providers/openai/models/"+upstreamModel, map[string]any{"active": true}, nil); err != nil {
+	if err := apiJSON(http.MethodPut, base+"/api/providers/openai/models/"+upstreamModel, map[string]any{"active": true}, nil, token); err != nil {
 		return "", fmt.Errorf("activate model: %w", err)
+	}
+	if err := apiJSON(http.MethodPut, base+"/api/cache", map[string]any{"enabled": false}, nil, token); err != nil {
+		return "", fmt.Errorf("disable cache: %w", err)
 	}
 	var created struct {
 		Secret string `json:"secret"`
 	}
-	if err := apiJSON(http.MethodPost, base+"/api/keys", map[string]any{"name": "bench"}, &created); err != nil {
+	if err := apiJSON(http.MethodPost, base+"/api/keys", map[string]any{"name": "bench"}, &created, token); err != nil {
 		return "", fmt.Errorf("create router key: %w", err)
 	}
 	if created.Secret == "" {
@@ -198,8 +206,9 @@ func configureGateway(mockBase string) (string, error) {
 	return created.Secret, nil
 }
 
-// configureVirtual saves one provider, one deployment, and the virtual model
-// "chat", with the response cache off. The gateway still writes its request log.
+// configureVirtual saves one provider, one deployment, and the model name
+// "chat" through the admin API, with the response cache off. It is the same
+// gateway as configureGateway, started with the console's model document.
 func configureVirtual(dataDir, mockBase string) (string, error) {
 	tokenRaw, err := os.ReadFile(filepath.Join(dataDir, "bootstrap-token"))
 	if err != nil {
@@ -219,23 +228,23 @@ func configureVirtual(dataDir, mockBase string) (string, error) {
 		"base_url": mockBase + "/v1",
 		"auth":     map[string]any{"api_key": upstreamKey},
 	}); err != nil {
-		return "", fmt.Errorf("save virtual provider: %w", err)
+		return "", fmt.Errorf("save provider: %w", err)
 	}
 	if err := put("/deployments/mini", map[string]any{
 		"provider": "openai",
 		"model":    upstreamModel,
 		"enabled":  true,
 	}); err != nil {
-		return "", fmt.Errorf("save virtual deployment: %w", err)
+		return "", fmt.Errorf("save deployment: %w", err)
 	}
 	if err := put("/models/chat", map[string]any{
 		"enabled": true,
 		"target":  map[string]any{"type": "deployment", "deployment": "mini"},
 	}); err != nil {
-		return "", fmt.Errorf("save virtual model: %w", err)
+		return "", fmt.Errorf("save model: %w", err)
 	}
 	if err := put("/settings/cache", map[string]any{"enabled": false}); err != nil {
-		return "", fmt.Errorf("disable virtual cache: %w", err)
+		return "", fmt.Errorf("disable cache: %w", err)
 	}
 	var created struct {
 		Secret string `json:"secret"`
@@ -244,19 +253,19 @@ func configureVirtual(dataDir, mockBase string) (string, error) {
 		"name": "bench",
 		"spec": map[string]any{"enabled": true},
 	}, &created); err != nil {
-		return "", fmt.Errorf("create virtual key: %w", err)
+		return "", fmt.Errorf("create key: %w", err)
 	}
 	if created.Secret == "" {
-		return "", fmt.Errorf("create virtual key: empty secret")
+		return "", fmt.Errorf("create key: empty secret")
 	}
 	return created.Secret, nil
 }
 
-func apiJSON(method, url string, body any, dest any) error {
-	return apiJSONAuth(method, url, "", body, dest)
+func apiJSON(method, url string, body any, dest any, token string) error {
+	return apiJSONAuth(method, url, token, body, dest)
 }
 
-func apiJSONAuth(method, url, bearer string, body any, dest any) error {
+func apiJSONAuth(method, url, token string, body any, dest any) error {
 	var reader io.Reader
 	if body != nil {
 		raw, err := json.Marshal(body)
@@ -272,8 +281,8 @@ func apiJSONAuth(method, url, bearer string, body any, dest any) error {
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if bearer != "" {
-		req.Header.Set("Authorization", "Bearer "+bearer)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)

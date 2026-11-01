@@ -8,7 +8,7 @@ import (
 )
 
 // Instant chat completion and a short SSE stream. The upstream adds no scripted
-// delay (the L0 profile in the Antirion harness): the handler answers as soon
+// delay: the handler answers as soon
 // as it has read the request body.
 var completionBody = []byte(`{"id":"chatcmpl-bench","object":"chat.completion","created":0,"model":"gpt-4o-mini","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":128,"completion_tokens":1,"total_tokens":129}}`)
 

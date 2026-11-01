@@ -1,27 +1,21 @@
 package admin
 
+// Modified by WowRouter.
+// Derived from Antirion (https://github.com/eliasbiondo/antirion), Copyright 2026 Elias Biondo, Apache-2.0.
+
 import (
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
-	"airoute/server/internal/gateway"
+	"wowrouter/server/internal/catalogdata"
+	"wowrouter/server/internal/gateway"
 )
-
-type API struct {
-	Store   *Store
-	Engine  *gateway.Engine
-	Version string
-	OpenAPI []byte
-}
-
-func New(store *Store, version string) *API {
-	return &API{Store: store, Engine: gateway.New(store), Version: version}
-}
 
 func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/admin/v1")
@@ -134,9 +128,11 @@ func (a *API) route(w http.ResponseWriter, r *http.Request, path string) {
 		writeJSON(w, http.StatusOK, map[string]any{"items": a.Store.ListAudit(100), "next_cursor": nil})
 	case path == "provider-types" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"items": providerTypes(), "next_cursor": nil})
+	case strings.HasPrefix(path, "providers/") && strings.HasSuffix(path, "/models") && r.Method == http.MethodGet:
+		a.providerModels(w, r, strings.TrimSuffix(strings.TrimPrefix(path, "providers/"), "/models"))
 	case path == "catalog" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{
-			"bundled": map[string]any{"version": "local", "price_version": "local", "entries": 0},
+			"bundled": map[string]any{"version": "models.dev", "price_version": "models.dev", "entries": catalogdata.ModelCount()},
 			"runtime": nil,
 			"items":   []any{},
 		})
@@ -226,6 +222,8 @@ func (a *API) action(w http.ResponseWriter, r *http.Request, path string) bool {
 	switch {
 	case strings.HasPrefix(base, "providers/") && act == "test":
 		a.providerTest(w, r, strings.TrimPrefix(base, "providers/"))
+	case strings.HasPrefix(base, "providers/") && act == "rotate_credential":
+		a.rotateCredential(w, r, strings.TrimPrefix(base, "providers/"))
 	case strings.HasPrefix(base, "guardrails/") && act == "test":
 		a.guardTest(w, r, strings.TrimPrefix(base, "guardrails/"))
 	case strings.HasPrefix(base, "routes/") && act == "simulate":
@@ -1043,13 +1041,24 @@ func providerTypes() []any {
 		{"openai_compatible", "", []string{"api_key", "none"}, []string{"openai_chat"}},
 		{"anthropic_compatible", "", []string{"api_key"}, []string{"anthropic_messages"}},
 	}
+	seen := map[string]bool{}
 	out := []any{}
-	for _, row := range rows {
-		var base any = row.URL
-		if row.URL == "" {
+	add := func(typ, url string, auth, dialects []string, core bool) {
+		if seen[typ] {
+			return
+		}
+		seen[typ] = true
+		var base any = url
+		if url == "" {
 			base = nil
 		}
-		out = append(out, map[string]any{"type": row.Type, "core": true, "default_base_url": base, "dialects": row.Dialects, "auth_methods": row.Auth})
+		out = append(out, map[string]any{"type": typ, "core": core, "default_base_url": base, "dialects": dialects, "auth_methods": auth})
+	}
+	for _, row := range rows {
+		add(row.Type, row.URL, row.Auth, row.Dialects, true)
+	}
+	for _, p := range catalogdata.Providers() {
+		add(p.ID, p.API, []string{"api_key"}, []string{catalogdata.Dialect(p.ID)}, false)
 	}
 	return out
 }
@@ -1105,4 +1114,106 @@ func writeJSON(w http.ResponseWriter, status int, body any) {
 
 func writeErr(w http.ResponseWriter, status int, code, message string) {
 	writeJSON(w, status, map[string]any{"error": map[string]any{"code": code, "message": message}})
+}
+
+func (a *API) providerModels(w http.ResponseWriter, r *http.Request, name string) {
+	q := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	wantID := strings.TrimSpace(r.URL.Query().Get("id"))
+	p, ok := catalogdata.ByID(name)
+	if !ok {
+		// A saved provider may use a type name that matches the directory.
+		if res, err := a.Store.Get("providers", name); err == nil {
+			if alt, ok := catalogdata.ByID(asString(res.Spec["type"])); ok {
+				p = alt
+				ok = true
+			}
+		}
+	}
+	items := []any{}
+	if ok {
+		for _, m := range p.Models {
+			if wantID != "" && m.ID != wantID {
+				continue
+			}
+			if q != "" && !strings.Contains(strings.ToLower(m.ID), q) && !strings.Contains(strings.ToLower(m.Name), q) {
+				continue
+			}
+			var price any
+			if m.Input != 0 || m.Output != 0 {
+				price = map[string]any{"input": trimFloat(m.Input), "output": trimFloat(m.Output), "cache_read": nil, "cache_write": nil}
+			}
+			var ctx, max any
+			if m.Context > 0 {
+				ctx = m.Context
+			}
+			if m.MaxOut > 0 {
+				max = m.MaxOut
+			}
+			items = append(items, map[string]any{
+				"id": m.ID, "name": m.Name, "listed_by_provider": false,
+				"context_window": ctx, "max_output_tokens": max,
+				"modalities": nil, "price": price, "price_source": "catalog", "release_date": nil,
+			})
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "source": "catalog", "fetched_at": nil, "error": nil})
+}
+
+func trimFloat(v float64) string {
+	s := strconv.FormatFloat(v, 'f', -1, 64)
+	return s
+}
+
+func (a *API) rotateCredential(w http.ResponseWriter, r *http.Request, name string) {
+	var body map[string]any
+	if err := readBody(r, &body); err != nil {
+		writeErr(w, http.StatusBadRequest, "invalid_body", err.Error())
+		return
+	}
+	res, err := a.Store.Get("providers", name)
+	if errors.Is(err, ErrNotFound) {
+		writeErr(w, http.StatusNotFound, "not_found", "No such provider.")
+		return
+	}
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	secret := asString(body["credential"])
+	if secret == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_body", "credential is required")
+		return
+	}
+	spec := cloneMap(res.Private)
+	if spec == nil {
+		spec = map[string]any{}
+	}
+	auth := asMap(spec["auth"])
+	if auth == nil {
+		auth = map[string]any{}
+	}
+	keyName := asString(body["key"])
+	if keys := asSlice(auth["api_keys"]); len(keys) > 0 && keyName != "" {
+		for i, item := range keys {
+			row := asMap(item)
+			if asString(row["name"]) == keyName {
+				row["key"] = secret
+				keys[i] = row
+			}
+		}
+		auth["api_keys"] = keys
+	} else if keyName != "" && keyName != "default" {
+		auth["api_keys"] = append(asSlice(auth["api_keys"]), map[string]any{"name": keyName, "key": secret, "weight": 1})
+	} else {
+		auth["api_key"] = secret
+		auth["method"] = or(asString(auth["method"]), "api_key")
+	}
+	spec["auth"] = auth
+	saved, err := a.Store.Put("providers", name, spec, "", false)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
+		return
+	}
+	a.Store.AddAudit(map[string]any{"action": "rotate_credential", "resource": "providers/" + name, "at": nowRFC()})
+	writeJSON(w, http.StatusOK, represent(saved))
 }

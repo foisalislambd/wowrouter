@@ -58,14 +58,14 @@ func (h *benchHarness) catalog() map[string]targetSpec {
 		"wowrouter": {
 			Name: "wowrouter", Model: publicModel,
 			RejectModel: "openai/bench-unknown", RejectModelStatus: 404,
-			RejectKey: "sk-airoute-bench-unknown", RejectKeyStatus: 401,
-			Version: h.version, Detail: "classic provider/model path; activity log on, one SQLite connection",
+			RejectKey: "sk-wowrouter-bench-unknown", RejectKeyStatus: 401,
+			Version: h.version, Detail: "one gateway, model openai/gpt-4o-mini, response cache off, activity log queued",
 		},
 		"virtual": {
 			Name: "virtual", Model: "chat",
 			RejectModel: "bench-unknown", RejectModelStatus: 404,
 			RejectKey: "sk-wowrouter-bench-unknown-key", RejectKeyStatus: 401,
-			Version: h.version, Detail: "virtual model chat; response cache off; request log on",
+			Version: h.version, Detail: "same gateway, admin model chat, response cache off, request log on",
 		},
 		"proxy": {
 			Name: "proxy", Model: upstreamModel,
@@ -219,7 +219,7 @@ func (h *benchHarness) launchWowrouter(live *liveTarget, virtual bool) error {
 	if virtual {
 		live.auth, err = configureVirtual(dataDir, "http://"+mockAddr)
 	} else {
-		live.auth, err = configureGateway("http://" + mockAddr)
+		live.auth, err = configureGateway(dataDir, "http://"+mockAddr)
 	}
 	if err != nil {
 		return fmt.Errorf("%w\n%s", err, live.proc.tail.String())

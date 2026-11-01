@@ -127,10 +127,9 @@ func cellFilter(raw string) map[string]bool {
 
 func benchmarkNotes() []string {
 	return []string{
-		"The generator, the mock, and the gateway share one machine. This is not Antirion's published layout, where the generator, the mock, and the gateway each have a c7i machine.",
+		"The generator, the mock, and the gateway share one machine. This is a local measurement, not an isolated multi-machine reference run, and it is not Antirion's published layout, where each role has a c7i machine.",
 		"Repetitions are interleaved: within a cell, each gateway runs in turn, then the next repetition starts. The published value is the median of the repetitions.",
-		"WowRouter classic is measured as it ships. Each chat request checks the router key, resolves the model, rewrites the body, calls the upstream, updates the account, and appends the activity log. Those database calls share one SQLite connection. There is no switch to turn that log off.",
-		"WowRouter virtual is the model name chat: one deployment, one gateway key, response cache off. The engine still writes a request log and an activity row. A model id that contains / stays on the classic path.",
+		"WowRouter is one gateway, measured as it ships, with the exact response cache turned off. Each chat request checks the router key against an in-memory snapshot, reads that key row from SQLite for project and team, resolves the model, rewrites the body, and calls the upstream. The activity log is queued onto one background SQLite writer. The model chat target is the same gateway configured through the admin API.",
 		"The loopback proxy is a baseline that lives in this harness: a Go reverse proxy with no authentication, no rewrite, and no request log. It is not another product.",
 		"Other gateways use one key checked on each request where the build has a key, no cache, and request logging off where the build has that switch. LiteLLM runs one worker per CPU. Bifrost uses the pool sizes from its own published benchmark (15000 / 20000 / 10000 on this 4-CPU machine). Its OpenAI-compatible base URL is the mock origin, because Bifrost appends /v1/chat/completions.",
 		"Windows stay the ones this harness already published for WowRouter: 3 repetitions, mostly 2s warm-up and 5s measure. That is shorter than Antirion's 5 repetitions of 10s warm-up and 30s measure on dedicated AWS machines.",

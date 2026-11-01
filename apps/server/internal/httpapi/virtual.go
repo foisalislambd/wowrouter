@@ -10,49 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"airoute/server/internal/gateway"
-	"airoute/server/internal/store"
+	"wowrouter/server/internal/gateway"
 )
-
-func (s *Server) serveVirtual(w http.ResponseWriter, keyID, model string, raw []byte, dialect string) bool {
-	if s.Admin == nil || !s.Admin.Engine.Owns(model) {
-		return false
-	}
-	var body map[string]any
-	if json.Unmarshal(raw, &body) != nil {
-		body = map[string]any{"model": model}
-	}
-	call := gateway.Call{Model: model, Body: body, Dialect: dialect}
-	if strings.HasPrefix(keyID, "gw:") {
-		name := strings.TrimPrefix(keyID, "gw:")
-		call.KeyName = name
-		if res, err := s.Admin.Store.Get("keys", name); err == nil {
-			call.Project = str(res.Spec["project"])
-			if proj, err := s.Admin.Store.Get("projects", call.Project); err == nil {
-				call.Team = str(proj.Spec["team"])
-				call.Organization = str(proj.Spec["organization"])
-			}
-			if tags, ok := res.Spec["tags"].([]any); ok {
-				for _, tag := range tags {
-					call.Tags = append(call.Tags, str(tag))
-				}
-			}
-		}
-	}
-	out := s.Admin.Engine.Handle(call)
-	_ = s.Store.AddLog(store.LogInput{
-		Source: "gateway", RouterKeyID: keyID, ModelID: model, StatusCode: out.Status,
-		LatencyMS: int(out.Latency.Milliseconds()), PromptTokens: out.Prompt, CompletionTokens: out.Output,
-		ErrorMessage: out.Error,
-	})
-	if dialect != "openai" && out.Status < 400 {
-		out.Body = gateway.FromOpenAI(dialect, model, out.Body)
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(out.Status)
-	_, _ = w.Write(out.Body)
-	return true
-}
 
 func str(v any) string {
 	s, _ := v.(string)
@@ -91,11 +50,7 @@ func (s *Server) dialect(w http.ResponseWriter, r *http.Request, kind, model str
 	}
 	encoded, _ := json.Marshal(body)
 	model = str(body["model"])
-	if s.serveVirtual(w, keyID, model, encoded, kind) {
-		return
-	}
-	r.Body = io.NopCloser(bytes.NewReader(encoded))
-	s.proxyChat(w, r, "gateway", keyID)
+	s.dispatch(w, keyID, encoded, kind, model)
 }
 
 func (s *Server) gatewayMCP(w http.ResponseWriter, r *http.Request) {

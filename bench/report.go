@@ -250,9 +250,9 @@ func targetNames(cell CellResult) []string {
 func displayTarget(name string) string {
 	switch name {
 	case "wowrouter":
-		return "WowRouter classic"
+		return "WowRouter"
 	case "virtual":
-		return "WowRouter virtual"
+		return "WowRouter (model chat)"
 	case "proxy":
 		return "Loopback proxy"
 	case "antirion":

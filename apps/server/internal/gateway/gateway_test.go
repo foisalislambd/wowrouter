@@ -223,8 +223,8 @@ func TestSafeURLAndAzurePath(t *testing.T) {
 	if !strings.Contains(path, "/openai/deployments/my%20deploy/chat/completions") {
 		t.Fatalf("path %s", path)
 	}
-	if strings.Contains(string(payload), `"stream"`) {
-		t.Fatalf("stream forwarded: %s", payload)
+	if !strings.Contains(string(payload), `"stream":true`) {
+		t.Fatalf("stream dropped: %s", payload)
 	}
 	_, anth, _ := ToUpstream("anthropic", body, "claude")
 	if !strings.Contains(string(anth), `"system":"a\nb"`) && !strings.Contains(string(anth), `"system":"a\\nb"`) {

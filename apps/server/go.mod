@@ -1,4 +1,4 @@
-module airoute/server
+module wowrouter/server
 
 go 1.26.5
 

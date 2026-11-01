@@ -82,7 +82,7 @@ func passes(success, offered int, overheadP99 time.Duration) bool {
 }
 
 // directP99Bound is the clean-baseline limit for a direct run on this harness.
-// Antirion's reference topology uses 1ms, measured on a dedicated mock machine.
+// A dedicated mock machine can use a 1ms bound.
 // Here the mock shares the machine with the generator, and a quiet direct run
 // already comes back around 1–2ms, so a 1ms rule would reject every step.
 // 5ms still marks a baseline that is too noisy to subtract.

@@ -49,7 +49,7 @@ Each archive is the desktop app plus the panel folder it serves.
 - Windows: unzip and run \`WowRouter.exe\`. Closing the window leaves the router running. The tray icon opens it again or quits it. WebView2 comes with current Windows 10 and 11.
 - macOS and Linux: unzip, run \`./WowRouter\`. Closing the browser tab leaves the router running until you stop the process.
 
-The app listens on \`127.0.0.1:8787\`. Data stays in the local airoute-router folder.
+The app listens on \`127.0.0.1:8787\`. Data is stored in the local wowrouter folder. An older airoute-router folder is read once for providers, models, fallbacks, and settings. Old router keys are not imported.
 
 Install the same version from npm with \`npm install -g wowrouter\`, then run \`wowrouter\`. \`npm install -g airoute\` and the \`airoute\` command are the same program. GitHub Packages has \`@foisalislambd/wowrouter\` and \`@foisalislambd/airoute\`.
 

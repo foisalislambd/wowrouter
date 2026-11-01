@@ -2,7 +2,7 @@
 
 How much time WowRouter adds to a chat request, measured on one machine against a mock provider that answers immediately, next to every other gateway that could be installed and started on that machine. The harness is in `bench/`. This page says what is measured, how, and how to run it. The numbers in [Results](#results) are one real run, not an estimate, and they are not copied from anyone else's README.
 
-Antirion publishes a multi-machine comparison. This run keeps that idea (open-loop overhead against an instant upstream, plus a closed loop, rejections, streaming, memory, and a saturation ladder) and changes the parts that do not fit a shared 4-CPU machine. Both WowRouter paths are included: classic `openai/gpt-4o-mini`, and the virtual model `chat`.
+WowRouter is one local gateway: it listens on a loopback address, and every chat call is authenticated, rewritten, and written to a local activity log. The harness also starts the other gateways that can be installed on the same machine. This benchmark measures open-loop overhead against an instant upstream, plus a closed loop, rejections, streaming, memory, and a saturation ladder. The WowRouter numbers in [Results](#results) are the later run of that single gateway. Peer-gateway numbers from an earlier run are in [Peer gateways](#peer-gateways).
 
 - [What is measured](#what-is-measured)
 - [How it is measured](#how-it-is-measured)
@@ -10,6 +10,7 @@ Antirion publishes a multi-machine comparison. This run keeps that idea (open-lo
 - [What the router does on each request](#what-the-router-does-on-each-request)
 - [Reproducing the results](#reproducing-the-results)
 - [Results](#results)
+- [Peer gateways](#peer-gateways)
 
 ## What is measured
 
@@ -31,7 +32,7 @@ Every load repetition is a run through the target and, when the target is suppos
 
 Latency percentiles use successful responses only. The percentile is nearest rank: `ceil(p * n) - 1` on the sorted samples.
 
-A direct run is clean when at least 99.5% of its requests succeed and its p99 is at most 5ms. Antirion's reference rule is 1ms, on a mock that has its own machine. On this shared machine the direct path itself is about 1–2ms, so a 1ms rule would fail every cell. Cells that miss the 5ms rule are still reported. They are marked in the run's `report.md`.
+A direct run is clean when at least 99.5% of its requests succeed and its p99 is at most 5ms. On this shared machine the direct path itself is about 1–2ms, so a 1ms rule would fail every cell. Cells that miss the 5ms rule are still reported. They are marked in the run's `report.md`.
 
 ## How it is measured
 
@@ -47,7 +48,7 @@ One Linux machine runs all three roles:
 
 The loopback proxy is a Go `httputil.ReverseProxy` with no authentication, no model rewrite, and no activity log. It is a baseline for the cost of an extra HTTP hop on this machine. It is not another product.
 
-The gateway, the generator, and the mock share the CPUs. Antirion's published comparison puts each role on its own c7i machine and uses five repetitions of 10s warm-up and 30s measure. This run uses the shorter windows already in this harness, three repetitions, and does not claim those AWS numbers.
+The gateway, the generator, and the mock share the CPUs. Antirion's published comparison puts each role on its own c7i machine and uses five repetitions of 10s warm-up and 30s measure. This harness uses the shorter windows already published for WowRouter, three repetitions, and does not claim those AWS numbers. WowRouter stays on loopback. Other products are started on this same machine when `bench/setup-targets.sh` has installed them.
 
 The generator schedules an open-loop request by sleeping until its send time. It does not spin. Kernel sleep is often about a millisecond late; that lateness is counted, and it is also present in the direct run, which is why overhead is the figure to compare.
 
@@ -56,7 +57,7 @@ A request the generator cannot hand to a worker within 8 seconds of its schedule
 ### Procedure
 
 - The server binary is `go build -trimpath` of `./apps/server/cmd/wowrouter`. The harness binary is built the same way.
-- Each WowRouter repetition gets a new data directory. Startup loads the provider catalog into SQLite, then the harness saves an OpenAI key, points the base URL at the mock, turns on `gpt-4o-mini`, and creates one router key.
+- Each WowRouter repetition gets a new data directory. Startup opens SQLite, then the harness saves an OpenAI key, points the base URL at the mock, turns on `gpt-4o-mini`, creates one router key, and turns the exact response cache off.
 - The public model id is `openai/gpt-4o-mini`. WowRouter rewrites it to `gpt-4o-mini` before it calls the mock. The direct run sends `gpt-4o-mini` itself. The mock ignores the key and the model name.
 - The target process is stopped before the direct run, so the direct run does not share the CPU with an idle router.
 - Load cells use three repetitions unless noted. The published value of each metric is the median of the repetitions.
@@ -76,9 +77,9 @@ The chat body is a fixed JSON request of a few hundred bytes (`bench/corpus.go`)
 | closed-64 | Throughput with connections kept busy | 64 concurrent clients, every installed target | 2s + 5s, 3 reps |
 | stream | Time to first byte | Open loop, 200 requests/s, SSE | 2s + 5s, 3 reps |
 | chat-1000 | Simple chat, heavier open loop | 1,000 requests/s | 2s + 5s, 3 reps |
-| chat-5000 | A high open-loop rate | 5,000 requests/s | 2s + 3s, 3 reps |
-| reject-key | A bearer token the gateway does not know | 2,000 requests/s. Status depends on the product. Skipped when the build has no stored client key | 1s + 4s, 3 reps |
-| reject-model | A model id the gateway should refuse | 2,000 requests/s. Skipped when the product forwards the name upstream | 1s + 4s, 3 reps |
+| chat-5000 | A heavy open loop | 5,000 requests/s | 2s + 3s, 3 reps |
+| reject-key | A bearer token the gateway does not know | 2,000 requests/s. WowRouter expects 401 and does not call upstream. Skipped when the build has no stored client key | 1s + 4s, 3 reps |
+| reject-model | A model id the gateway should refuse | 2,000 requests/s. WowRouter uses `openai/bench-unknown` and expects 404. Skipped when the product forwards the name upstream | 1s + 4s, 3 reps |
 | idle | Resident memory with no chat load | Every installed target | 3 reps |
 | ladder | Highest open-loop rate that passes | 100, then 250, 500, 1000, 2000, 4000, 8000, per gateway | 1s + 3s, 1 rep, stop at that gateway's first miss |
 
@@ -88,16 +89,16 @@ The chat body is a fixed JSON request of a few hundred bytes (`bench/corpus.go`)
 
 The headline path is `POST /v1/chat/completions` as a normal client sends it:
 
-1. Hash the router key and load it from SQLite, then update `last_used_at`.
-2. Resolve `openai/gpt-4o-mini` and load the provider key.
-3. Expand the provider account and, after a successful upstream call, touch that account.
+1. Check the bearer token against an in-memory map of router-key hashes. A token that does not start with `sk-wowrouter-` stops here.
+2. Read that key's row from SQLite so the call can carry its project and team.
+3. Resolve `openai/gpt-4o-mini` from the in-memory snapshot and take the provider key from the same snapshot.
 4. Rewrite the JSON body to the upstream model id.
 5. Call the mock and read the response.
-6. Insert an activity-log row and delete rows older than the newest 5,000.
+6. Queue an activity-log row for one background SQLite writer. If that queue is full, the row is dropped. The benchmark leaves the log on.
 
-Those database calls use one SQLite connection (`SetMaxOpenConns(1)`), with WAL. There is no switch to turn the activity log off, so the benchmark leaves it on. An unknown router key is rejected before the log write. An unknown model is rejected after a log write.
+The exact response cache is on by default. This run turns it off with `PUT /api/cache` before the load, so a repeated body still calls the mock. An unknown router key is rejected before the model lookup. An unknown model is rejected from the snapshot and then logged. A streamed response is SSE ending in `data: [DONE]`.
 
-The virtual path is the model name `chat` (no slash). The harness saves one OpenAI-compatible provider, one deployment of `gpt-4o-mini`, and that model, and it turns the response cache off. The default cache would otherwise answer the repeated body without calling the mock. The engine still writes its request log and an activity row. A streamed request on this path came back as HTTP 200 whose body was not an SSE stream ending in `[DONE]`, so the streaming cell was not scored for it.
+The harness can also start the same gateway with the admin model name `chat` (`-targets virtual`): one provider, one deployment of `gpt-4o-mini`, that model, and the response cache off. That is the same engine, not a second router. The published WowRouter tables use `openai/gpt-4o-mini`.
 
 The proxy skips authentication, rewrite, and logging, and forwards the bytes.
 
@@ -123,7 +124,7 @@ From the repository root, on Linux, with Go 1.26 or newer. Peer gateways need th
 ./bench/run.sh -out bench/results/published
 ```
 
-`npm run bench` builds WowRouter and runs the harness without `-out`. The harness writes `summary.json` and `report.md` under `bench/results/<timestamp>/`. Pass `-cells h1,idle` to run part of the matrix. Pass `-targets wowrouter,virtual` to run part of the gateway list. Pass `-quick` for a smoke run. Do not publish `-quick`.
+`npm run bench` builds WowRouter and runs the harness without `-out`. The harness writes `summary.json` and `report.md` under `bench/results/<timestamp>/`. Pass `-cells h1,idle` to run part of the matrix. Pass `-targets wowrouter,proxy` to run part of the gateway list. The admin model `chat` is `-targets virtual`. Pass `-quick` for a smoke run. Do not publish `-quick`.
 
 The run recorded in this document used:
 
@@ -136,9 +137,9 @@ Run it on the machine you care about. A laptop and this virtual machine will not
 
 ## Results
 
-Measured on 2026-11-01 from 13:55:20Z to 15:10:34Z. The WowRouter binary was `go build -trimpath` of commit `35fdf61` (WowRouter 1.1.8). The machine was a KVM guest reporting `Intel(R) Xeon(R) Processor`, 4 CPUs, GOMAXPROCS 4, MemTotal 16003.2 MiB, kernel `Linux 6.12.94+`, Go 1.26.5. Load average at the start was 3.48 3.21 2.02. The chat request was 415 bytes and the mock completion was 248 bytes.
+Measured on 2026-11-01 starting 17:20:22Z. The router binary was `go build -trimpath` of WowRouter 1.1.8. The machine was a KVM guest reporting `Intel(R) Xeon(R) Processor`, 4 CPUs, GOMAXPROCS 4, MemTotal 16003.2 MiB, kernel `Linux 6.12.94+`, Go 1.26.5. Load average at the start was 1.17 0.33 0.12. The chat request was 415 bytes and the mock completion was 248 bytes. The exact response cache was off. This run measured WowRouter and the loopback proxy.
 
-The mock self-test, 2,000 requests/s straight to the mock, returned p50 577 µs, p99 1.34 ms, 4,000 of 4,000 successful.
+The mock self-test, 2,000 requests/s straight to the mock, returned p50 569 µs, p99 1.34 ms, 4,000 of 4,000 successful.
 
 Figures below are medians of the repetitions. Every cell, including each repetition, is in [bench/results/published/report.md](../bench/results/published/report.md). `summary.json` next to it is the source.
 
@@ -146,12 +147,71 @@ Within a cell the targets run in turn, then the next repetition starts, so a slo
 
 ### Comparison
 
+| | WowRouter | Loopback proxy | Direct |
+| --- | ---: | ---: | ---: |
+| Overhead p50 | 269 µs | 102 µs | — |
+| Overhead p99 | 469 µs | 114 µs | — |
+| Latency p50 | 1.04 ms | 850 µs | 762 µs |
+| Latency p99 | 1.87 ms | 1.60 ms | 1.41 ms |
+| Latency p99.9 | 2.96 ms | 2.23 ms | 2.00 ms |
+| Success | 100% (2500/2500) | 100% (2500/2500) | 100% (2500/2500) |
+| CPU per request | 596 µs | 228 µs | — |
+| CPU | 0.30 cores | 0.11 cores | — |
+| Peak RSS | 22.7 MiB | 13.8 MiB | — |
+| Ready | 37 ms | 31 ms | — |
+
+At this rate the router used about a third of one core. The mock used 0.05 cores and the generator 0.13.
+
+
+| Scenario | WowRouter | Loopback proxy | Direct |
+| --- | --- | --- | --- |
+| 64 connections, success rate | 6,744 req/s | 19,816 req/s | 55,455 req/s |
+| 64 connections, latency p50 / p99 | 7.97 ms / 30.95 ms | 3.10 ms / 7.83 ms | 809 µs / 5.05 ms |
+| 64 connections, overhead p50 / p99 | 7.21 ms / 26.70 ms | 2.27 ms / 3.16 ms | — |
+| Streaming, 200 requests/s, TTFT p50 / p99 | 1.23 ms / 2.15 ms | — | 896 µs / 1.59 ms |
+| Streaming, TTFT overhead p50 / p99 | 336 µs / 523 µs | — | — |
+| Streaming, total overhead p50 / p99 | 351 µs / 548 µs | — | — |
+| 1,000 requests/s, overhead p50 / p99 | 338 µs / 641 µs | — | p50 635 µs |
+| 5,000 requests/s, latency p50 / p99 | 2.28 ms / 16.00 ms | — | 572 µs / 1.41 ms |
+| 5,000 requests/s, success | 100% (15000/15000) | — | 100% (15000/15000) |
+| Unknown key, 2,000 requests/s, p50 / p99 | 587 µs / 1.37 ms | — | — |
+| Unknown model, 2,000 requests/s, p50 / p99 | 718 µs / 2.12 ms | — | — |
+| Idle RSS | 13.8 MiB | 7.9 MiB | — |
+| Ready, no chat load | 36 ms | 31 ms | — |
+
+The closed loop at 64 connections finished 6,744 requests/s in the median repetition, with no errors. Peak resident memory in that full-matrix run was 557.2 MiB, before the activity-log queue was capped. A later run of only that cell peaked at 30.7 MiB, with p50 7.32–8.81 ms and about 6,200–7,500 requests/s, and no errors. The direct run's p99 in the full-matrix cell was 5.05 ms, which is outside the 5 ms baseline rule, so that overhead is noisier. The loopback proxy reached 19,816 req/s at p50 3.10 ms.
+
+At 1,000 requests/s every request succeeded and p99 overhead was 641 µs. At 5,000 requests/s every request still finished (15,000 of 15,000) at p50 2.28 ms, and p99 overhead was 13.88 ms. Peak RSS in that cell was 258.9 MiB.
+
+An unknown router key at 2,000 requests/s was p50 587 µs and p99 1.37 ms, 8,000 of 8,000. An unknown model was p50 718 µs and p99 2.12 ms, also with no errors.
+
+Idle memory with no chat load: WowRouter 13.8 MiB, the proxy 7.9 MiB. Ready time for WowRouter was 36 ms, including saving the provider and key.
+
+### Saturation ladder
+
+One repetition per step, 1s warm-up and 3s measure. A step passes at 99.5% success, p99 overhead of at most 5ms, and a clean direct run. The ladder stops at the first miss.
+
+| Offered | Success | p50 | p99 | Overhead p50 | Overhead p99 | Direct p99 | Result |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| 100 rps | 300/300 | 1.12 ms | 2.15 ms | 291 µs | 709 µs | 1.44 ms | pass |
+| 250 rps | 750/750 | 1.23 ms | 1.90 ms | 400 µs | 412 µs | 1.49 ms | pass |
+| 500 rps | 1500/1500 | 983 µs | 1.71 ms | 260 µs | 299 µs | 1.41 ms | pass |
+| 1,000 rps | 3000/3000 | 964 µs | 1.78 ms | 339 µs | 443 µs | 1.34 ms | pass |
+| 2,000 rps | 6000/6000 | 834 µs | 2.31 ms | 262 µs | 982 µs | 1.33 ms | pass |
+| 4,000 rps | 12000/12000 | 1.35 ms | 7.49 ms | 776 µs | 6.13 ms | 1.36 ms | stop |
+
+Highest passing step: **2,000 requests/s**. The 4,000 step still returned every response, and the direct p99 was 1.36 ms, but p99 overhead was 6.13 ms.
+
+## Peer gateways
+
+An earlier run on the same machine, 2026-11-01 from 13:55:20Z to 15:10:34Z, measured WowRouter at commit `35fdf61` together with the other products that started here. That binary still had two configurations, and its WowRouter rows are not the current gateway. Use the tables above for WowRouter. The other rows are that run. The files are [bench/results/comparison/report.md](../bench/results/comparison/report.md) and `summary.json` beside it. Load average at the start was 3.48 3.21 2.02. The mock self-test was p50 577 µs, p99 1.34 ms, 4,000 of 4,000.
+
 Overhead and latency are the 500 requests/s chat cell. Idle RSS is the separate no-load cell. Peak RSS is during the 500 requests/s cell. "Highest sustained" is the ladder. Unknown-key and unknown-model latencies are at 2,000 requests/s. A dash means that cell was not scored.
 
 | Gateway | Overhead p50 | Overhead p99 | Latency p50 | Latency p99 | CPU / request | Peak RSS | Idle RSS | 64-conn req/s | 64-conn p50 | Highest sustained | Unknown key p50 | Unknown model p50 | Errors at 500 rps |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| WowRouter classic | 673 µs | 1.30 ms | 1.42 ms | 2.66 ms | 632 µs | 26.4 MiB | 24.2 MiB | 1,901 | 31.87 ms | 1,000 rps | 605 µs | 1.02 ms | 0 |
-| WowRouter virtual | 1.09 ms | 2.06 ms | 1.83 ms | 3.45 ms | 856 µs | 29.4 MiB | 23.9 MiB | 1,512 | 41.34 ms | 1,000 rps | 607 µs | 2.05 s | 0 |
+| WowRouter, earlier binary | 673 µs | 1.30 ms | 1.42 ms | 2.66 ms | 632 µs | 26.4 MiB | 24.2 MiB | 1,901 | 31.87 ms | 1,000 rps | 605 µs | 1.02 ms | 0 |
+| WowRouter model `chat`, earlier binary | 1.09 ms | 2.06 ms | 1.83 ms | 3.45 ms | 856 µs | 29.4 MiB | 23.9 MiB | 1,512 | 41.34 ms | 1,000 rps | 607 µs | 2.05 s | 0 |
 | Loopback proxy | 65 µs | 207 µs | 852 µs | 1.59 ms | 224 µs | 14.1 MiB | 8.1 MiB | 19,187 | 3.15 ms | 8,000 rps | — | — | 0 |
 | Antirion | 254 µs | 400 µs | 1.02 ms | 1.79 ms | 292 µs | 129.4 MiB | 118.1 MiB | 18,818 | 3.04 ms | 8,000 rps | 617 µs | 586 µs | 0 |
 | Bifrost | 423 µs | 532 µs | 1.18 ms | 1.91 ms | 764 µs | 345.1 MiB | 271.3 MiB | 7,381 | 7.45 ms | 100 rps | 748 µs | 768 µs | 0 |
@@ -160,14 +220,14 @@ Overhead and latency are the 500 requests/s chat cell. Idle RSS is the separate 
 | Portkey | 831 µs | 2.41 ms | 1.59 ms | 3.79 ms | 1,240 µs | 179.2 MiB | 94.9 MiB | 2,834 | 20.86 ms | 250 rps | — | — | 0 |
 | Helicone | 369 µs | 652 µs | 1.08 ms | 2.02 ms | 384 µs | 46.7 MiB | 42.4 MiB | 16,872 | 3.60 ms | 8,000 rps | — | — | 0 |
 
-The direct run paired with classic WowRouter at 500 requests/s was p50 748 µs and p99 1.37 ms, 2,500 of 2,500. The same 64 clients against the mock, with the gateway stopped, reached 62,724 req/s at p50 714 µs in that paired direct run.
+The direct run paired with that earlier WowRouter binary at 500 requests/s was p50 748 µs and p99 1.37 ms, 2,500 of 2,500. The same 64 clients against the mock, with the gateway stopped, reached 62,724 req/s at p50 714 µs in that paired direct run.
 
 LiteLLM's CPU column is blank because the counter on the sampled process tree stayed at 0 while requests were being served. That is a gap in the sample, not a finding that LiteLLM used no CPU. Memory for LiteLLM is the resident set the harness could see (about 295 MiB).
 
 OmniRoute's 2,500 errors at 500 requests/s are requests that did not finish inside 8 seconds. Its unknown-key cell did run, and succeeded as HTTP 401, but the requests queued: p50 2.49 s at 2,000 requests/s.
 
-At 5,000 requests/s, classic WowRouter's median repetition finished 15,000 of 15,000 at p50 5.55 s and p99 7.87 s. The three repetitions finished 15,000, 15,000 and 14,238; the short one left 762 unsent. Virtual finished 10,326 of 15,000 in the median repetition, p50 7.37 s. Antirion finished 15,000 of 15,000 at p50 408 µs. Helicone finished 15,000 of 15,000 at p50 428 µs. Bifrost finished 15,000 of 15,000 at p50 940 µs, with p99 21.10 ms. The direct run was p50 577 µs. Negative overheads at that rate (a few hundred microseconds for Antirion and Helicone) mean the gateway's percentile was below the direct run's in that repetition. On a shared machine that happens when the direct run draws the noisier slice of CPU.
+At 5,000 requests/s, that earlier WowRouter binary's median repetition finished 15,000 of 15,000 at p50 5.55 s and p99 7.87 s. The three repetitions finished 15,000, 15,000 and 14,238; the short one left 762 unsent. The model `chat` configuration finished 10,326 of 15,000 in the median repetition, p50 7.37 s. Antirion finished 15,000 of 15,000 at p50 408 µs. Helicone finished 15,000 of 15,000 at p50 428 µs. Bifrost finished 15,000 of 15,000 at p50 940 µs, with p99 21.10 ms. The direct run was p50 577 µs. Negative overheads at that rate (a few hundred microseconds for Antirion and Helicone) mean the gateway's percentile was below the direct run's in that repetition. On a shared machine that happens when the direct run draws the noisier slice of CPU.
 
-Streaming at 200 requests/s, time-to-first-byte overhead p50: classic WowRouter 430 µs, the proxy 134 µs, Antirion 409 µs, Bifrost 590 µs, LiteLLM 6.61 ms. Virtual, Portkey, and Helicone failed the body or status check described above, so they have no streaming row.
+Streaming at 200 requests/s, time-to-first-byte overhead p50 on that run: the earlier WowRouter binary 430 µs, the proxy 134 µs, Antirion 409 µs, Bifrost 590 µs, LiteLLM 6.61 ms. The model `chat` configuration, Portkey, and Helicone failed the body or status check on that binary, so they have no streaming row. The current gateway's streaming row is in the table above.
 
-The ladder's highest passing step was 1,000 rps for both WowRouter paths, 8,000 rps for the proxy, Antirion, and Helicone, 100 rps for Bifrost, and 250 rps for Portkey. LiteLLM and OmniRoute passed no step. The ladder stops at 8,000, so "8,000 rps" means every step through 8,000 passed, not that a higher rate was tried.
+The ladder's highest passing step on that run was 1,000 rps for both WowRouter configurations, 8,000 rps for the proxy, Antirion, and Helicone, 100 rps for Bifrost, and 250 rps for Portkey. LiteLLM and OmniRoute passed no step. The ladder stops at 8,000, so "8,000 rps" means every step through 8,000 passed, not that a higher rate was tried. The current gateway's ladder, in the section above, passes through 2,000 requests/s.

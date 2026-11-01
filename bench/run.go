@@ -23,17 +23,13 @@ type cellPlan struct {
 }
 
 type benchHarness struct {
-	bin           string
-	mock          *childProc
-	clk           float64
-	cache         string
-	version       string
-	order         []string
-	failures      []TargetFailure
-	gatewayBody   []byte
-	directBody    []byte
-	streamGateway []byte
-	streamDirect  []byte
+	bin      string
+	mock     *childProc
+	clk      float64
+	cache    string
+	version  string
+	order    []string
+	failures []TargetFailure
 }
 
 func fullPlans(quick bool) []cellPlan {

@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"airoute/server/app"
+	"wowrouter/server/app"
 )
 
 func setupLog() {
