@@ -157,7 +157,7 @@ Idle memory is the separate no-load cell. Peak memory is during this 500 request
 | Unknown model at 2,000 req/s, p50 / p99 | 718 µs / 2.12 ms | — | — |
 | Streaming at 200 req/s, time-to-first-byte overhead p50 / p99 | 336 µs / 523 µs | — | — |
 
-At 5,000 requests/s every request finished. p99 overhead rose to 13.88 ms, so the saturation ladder stops at 2,000 requests/s. The closed loop at 64 connections kept the gateway near two cores and pushed resident memory to about 557 MiB in the median repetition.
+At 5,000 requests/s every request finished. p99 overhead rose to 13.88 ms, so the saturation ladder stops at 2,000 requests/s. The closed loop at 64 connections kept the gateway near two cores. A later run of that cell, after the activity-log queue was capped, peaked at 30.7 MiB and still finished about 6,200–7,500 requests/s.
 
 **How it is measured.** Open loop, latency from the scheduled send time, three repetitions, median of each metric. The upstream is a local mock with no added delay. [docs/benchmarks.md](docs/benchmarks.md) has the cells, the pass rule for the saturation ladder, and the machine. **Reproduce it** on Linux with Go 1.26 or newer:
 
@@ -214,4 +214,6 @@ Issues and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) be
 
 ## License
 
-WowRouter is [MIT](LICENSE) licensed. Copyright 2026 foisalislambd.
+WowRouter's own code is [MIT](LICENSE) licensed. Copyright 2026 foisalislambd.
+
+The web panel and parts of the gateway are derived from [Antirion](https://github.com/eliasbiondo/antirion), Copyright 2026 Elias Biondo, and are licensed under Apache-2.0. Those portions were modified. See [NOTICE](NOTICE) and [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt). The bundled model directory is from [models.dev](https://models.dev) under the MIT License.

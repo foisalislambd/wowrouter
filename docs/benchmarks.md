@@ -162,7 +162,7 @@ At this rate the router used about a third of one core. The mock used 0.05 cores
 | Idle RSS | 13.8 MiB | 7.9 MiB | — |
 | Ready, no chat load | 36 ms | 31 ms | — |
 
-The closed loop at 64 connections finished 6,744 requests/s in the median repetition, with no errors. Peak resident memory in that cell was 557.2 MiB. The direct run's p99 was 5.05 ms, which is outside the 5 ms baseline rule, so that cell's overhead is noisier. The loopback proxy reached 19,816 req/s at p50 3.10 ms.
+The closed loop at 64 connections finished 6,744 requests/s in the median repetition, with no errors. Peak resident memory in that full-matrix run was 557.2 MiB, before the activity-log queue was capped. A later run of only that cell peaked at 30.7 MiB, with p50 7.32–8.81 ms and about 6,200–7,500 requests/s, and no errors. The direct run's p99 in the full-matrix cell was 5.05 ms, which is outside the 5 ms baseline rule, so that overhead is noisier. The loopback proxy reached 19,816 req/s at p50 3.10 ms.
 
 At 1,000 requests/s every request succeeded and p99 overhead was 641 µs. At 5,000 requests/s every request still finished (15,000 of 15,000) at p50 2.28 ms, and p99 overhead was 13.88 ms. Peak RSS in that cell was 258.9 MiB.
 

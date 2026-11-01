@@ -1,3 +1,5 @@
+// Modified by WowRouter.
+// Derived from Antirion (https://github.com/eliasbiondo/antirion), Copyright 2026 Elias Biondo, Apache-2.0.
 package gateway
 
 import (
@@ -643,19 +645,31 @@ func (e *Engine) Dial(model string) (baseURL, apiKey, upstream string, err error
 }
 
 func providerKey(spec, priv map[string]any) string {
-	if accounts := asSlice(priv["accounts"]); len(accounts) > 0 {
-		for _, item := range accounts {
-			acc := asMap(item)
-			if acc["enabled"] == false {
+	for _, src := range []map[string]any{priv, spec} {
+		if accounts := asSlice(src["accounts"]); len(accounts) > 0 {
+			for _, item := range accounts {
+				acc := asMap(item)
+				if acc["enabled"] == false {
+					continue
+				}
+				if key := asString(acc["api_key"]); key != "" && key != "[REDACTED]" {
+					return key
+				}
+			}
+		}
+		auth := asMap(src["auth"])
+		for _, item := range asSlice(auth["api_keys"]) {
+			row := asMap(item)
+			if row["enabled"] == false {
 				continue
 			}
-			if key := asString(acc["api_key"]); key != "" {
+			if key := asString(row["key"]); key != "" && key != "[REDACTED]" {
 				return key
 			}
 		}
 	}
 	key := asString(asMap(priv["auth"])["api_key"])
-	if key == "" {
+	if key == "" || key == "[REDACTED]" {
 		key = asString(asMap(spec["auth"])["api_key"])
 	}
 	if key == "[REDACTED]" {

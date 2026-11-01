@@ -1,3 +1,5 @@
+// Modified by WowRouter.
+// Derived from Antirion (https://github.com/eliasbiondo/antirion), Copyright 2026 Elias Biondo, Apache-2.0.
 package httpapi
 
 import (
@@ -38,6 +40,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/images/generations", s.gatewayImages)
 	mux.HandleFunc("POST /v1/videos/generations", s.gatewayVideos)
 	if s.Admin != nil {
+		mux.Handle("/admin/v1/", s.Admin)
+		mux.Handle("/admin/v1", s.Admin)
 		mux.Handle("/api/", panelapi.New(s.Admin.Store, s.DataDir, s.Addr))
 		mux.HandleFunc("/scim/v2/", s.scim)
 		mux.HandleFunc("/scim/v2", s.scim)

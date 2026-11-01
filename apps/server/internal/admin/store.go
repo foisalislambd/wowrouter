@@ -60,7 +60,7 @@ type logItem struct {
 
 type cacheWrite struct {
 	key, model, prompt, response, vector string
-	exact                                 bool
+	exact                                bool
 }
 
 func Open(path string) (*Store, string, error) {
@@ -92,7 +92,7 @@ func Open(path string) (*Store, string, error) {
 	}
 	s.cacheExact = map[string]string{}
 	s.loadCache()
-	s.logs = make(chan logItem, 65536)
+	s.logs = make(chan logItem, 256)
 	s.logDone = make(chan struct{})
 	go s.logger()
 	return s, token, nil
@@ -113,7 +113,7 @@ func sqliteDSN(path string) (string, error) {
 		return "", err
 	}
 	u := url.URL{Scheme: "file", Path: "/" + filepath.ToSlash(abs)}
-	return u.String() + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)", nil
+	return u.String() + "?_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=cache_size(-2000)", nil
 }
 
 func (s *Store) migrate() error {
