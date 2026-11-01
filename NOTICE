@@ -22,3 +22,9 @@ Derived portions:
 apps/server/internal/catalogdata/models.dev.json is regenerated from
 https://models.dev and is under the MIT License. See
 apps/server/internal/catalogdata/NOTICE. It is not Antirion code.
+
+Provider preset data in apps/server/internal/presets/presets.json includes
+identifiers, base URLs, and model ids collected from OmniRoute and from
+all-llm-provider-list. The OmniRoute rows are MIT. See
+apps/server/internal/presets/NOTICE. The gateway code that installs and routes
+those presets was written for WowRouter.
