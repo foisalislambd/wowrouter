@@ -1,9 +1,0 @@
-*.tsbuildinfo
-.next/
-coverage/
-next-env.d.ts
-node_modules/
-out/
-playwright-report/
-public/mockServiceWorker.js
-test-results/

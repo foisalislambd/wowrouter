@@ -1,6 +1,7 @@
 import { panelConfig } from "@/config/panel.config";
 import { useSidebar } from "@/context/sidebar-context";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { logout } from "@/lib/api";
 import { Menu, X } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -24,8 +25,17 @@ export function PanelHeader() {
           </span>
           <span className="text-base font-semibold text-gray-900 dark:text-white">{panelConfig.brand.name}</span>
         </Link>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
           <ThemeToggle />
+          <button
+            type="button"
+            className="rounded-lg px-2 py-1 text-sm text-gray-500 hover:bg-gray-100 dark:hover:bg-white/10"
+            onClick={() => {
+              void logout().finally(() => window.location.assign("/login"));
+            }}
+          >
+            Sign out
+          </button>
         </div>
       </div>
     </header>

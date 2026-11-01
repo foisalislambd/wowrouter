@@ -1,0 +1,25 @@
+WowRouter
+Copyright (c) 2026 foisalislambd
+Licensed under the MIT License. See LICENSE.
+
+Some gateway behavior is still derived from Antirion and was modified to run
+inside WowRouter. Those parts are not a separate product, and this notice is
+not an endorsement.
+
+Antirion
+https://github.com/eliasbiondo/antirion
+Copyright 2026 Elias Biondo
+Licensed under the Apache License, Version 2.0.
+A copy of that license is in LICENSES/Apache-2.0.txt.
+
+The derived portions that remain in this repository are:
+
+- apps/server/internal/admin (document store, secret redaction, sample rows)
+- apps/server/internal/gateway (routing, guardrails, dialects, upstream calls)
+- apps/server/internal/httpapi (client protocol adapters, SCIM, streaming outcome writer)
+
+The admin console that shipped with Antirion is not included. WowRouter's web
+UI is apps/panel. The Antirion OpenAPI document is not included.
+
+The bundled models.dev catalog snapshot was not carried over, so that data is
+not redistributed here.

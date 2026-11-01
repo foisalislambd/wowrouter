@@ -5,7 +5,7 @@ import {
   SIDEBAR_WIDTH_EXPANDED,
   useSidebar,
 } from "@/context/sidebar-context";
-import { ChevronLeft, ChevronRight, LayoutGrid, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, X } from "lucide-react";
 import { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 
@@ -86,17 +86,6 @@ export function PanelSidebar() {
           </div>
         ))}
       </nav>
-
-      <div className="shrink-0 border-t border-gray-200 p-2.5 dark:border-gray-800">
-        <a
-          href="/ui/"
-          className={`flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-white/8 ${showLabels ? "" : "justify-center px-0"}`}
-          title={showLabels ? undefined : "Gateway console"}
-        >
-          <LayoutGrid className="h-[18px] w-[18px] shrink-0 text-gray-500 dark:text-gray-400" />
-          {showLabels && <span className="truncate">Gateway console</span>}
-        </a>
-      </div>
 
       {isDesktop && (
         <div className="shrink-0 border-t border-gray-200 p-2.5 dark:border-gray-800">

@@ -1,4 +1,4 @@
-const KEY = "airoute.providers.view";
+const KEY = "wowrouter.providers.view";
 
 export type ProviderListView = {
   q: string
@@ -33,7 +33,7 @@ export function providersListPath(view = readProviderListView()) {
   return query ? `/providers?${query}` : "/providers";
 }
 
-const modelKey = (slug: string) => `airoute.provider.${slug}.models`;
+const modelKey = (slug: string) => `wowrouter.provider.${slug}.models`;
 
 export function readModelSearch(slug: string) {
   try {

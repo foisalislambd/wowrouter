@@ -30,9 +30,9 @@ type StoredChat = {
   messages: ChatMessage[]
 };
 
-const CHATS_KEY = "airoute.playground.chats";
-const ACTIVE_KEY = "airoute.playground.active";
-const OPEN_KEY = "airoute.playground.history";
+const CHATS_KEY = "wowrouter.playground.chats";
+const ACTIVE_KEY = "wowrouter.playground.active";
+const OPEN_KEY = "wowrouter.playground.history";
 
 function readChats(): StoredChat[] {
   try {

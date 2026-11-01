@@ -60,7 +60,7 @@ export type RouterKey = {
 export type CreatedKey = RouterKey & { secret: string }
 
 export type ActivityItem = {
-  id: number
+  id: string
   createdAt: string
   source: string
   modelId: string
@@ -295,6 +295,61 @@ export function formatTokens(value: number) {
     return `${Number(millions.toFixed(2))}M`
   }
   return `${Math.round(value / 1000)}K`
+}
+
+export type BoardItem = {
+  id: string
+  title: string
+  detail: string
+  enabled: boolean
+  body: string
+}
+
+export function listBoard(kind: string) {
+  return request<{ items: BoardItem[] }>(`/api/boards/${kind}`)
+}
+
+export function saveBoard(kind: string, item: BoardItem) {
+  const path = item.id ? `/api/boards/${kind}/${encodeURIComponent(item.id)}` : `/api/boards/${kind}`
+  return request<BoardItem>(path, { method: item.id ? "PUT" : "POST", body: JSON.stringify(item) })
+}
+
+export function deleteBoard(kind: string, id: string) {
+  return request<void>(`/api/boards/${kind}/${encodeURIComponent(id)}`, { method: "DELETE" })
+}
+
+export function getCache() {
+  return request<{ enabled: boolean }>("/api/cache")
+}
+
+export function saveCache(enabled: boolean) {
+  return request<{ enabled: boolean }>("/api/cache", { method: "PUT", body: JSON.stringify({ enabled }) })
+}
+
+export function checkSafety(text: string) {
+  return request<{ text: string; blocked: boolean; hits: { Name: string; Action: string; Detail: string }[] }>("/api/safety/check", {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  })
+}
+
+export function saveKeyLimits(id: string, monthlyUsd: number, rpm: number) {
+  return request<{ id: string }>(`/api/keys/${encodeURIComponent(id)}/limits`, {
+    method: "PUT",
+    body: JSON.stringify({ monthlyUsd, rpm }),
+  })
+}
+
+export function sessionOK() {
+  return fetch("/api/session").then((response) => response.ok)
+}
+
+export function login(token: string) {
+  return request<{ ok: boolean }>("/api/login", { method: "POST", body: JSON.stringify({ token }) })
+}
+
+export function logout() {
+  return request<void>("/api/logout", { method: "POST" })
 }
 
 export function formatPrice(value: number) {
