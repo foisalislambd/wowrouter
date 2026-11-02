@@ -7,6 +7,7 @@ package presets
 import (
 	_ "embed"
 	"encoding/json"
+	"sort"
 	"strings"
 )
 
@@ -15,14 +16,18 @@ var raw []byte
 
 // Preset is one provider a person can install without typing a base URL.
 type Preset struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name"`
-	BaseURL string   `json:"base_url"`
-	Format  string   `json:"format"`
-	Auth    string   `json:"auth"`
-	Free    bool     `json:"free"`
-	Models  []string `json:"models"`
-	Sources []string `json:"sources"`
+	ID        string   `json:"id"`
+	Name      string   `json:"name"`
+	BaseURL   string   `json:"base_url"`
+	Format    string   `json:"format"`
+	Auth      string   `json:"auth"`
+	Free      bool     `json:"free"`
+	Models    []string `json:"models"`
+	Sources   []string `json:"sources"`
+	Supported bool     `json:"supported"`
+	Reason    string   `json:"reason,omitempty"`
+	Aliases   []string `json:"aliases,omitempty"`
+	Needs     []string `json:"needs,omitempty"`
 }
 
 var all []Preset
@@ -49,8 +54,41 @@ func init() {
 			p.Auth = "none"
 			p.Free = true
 		}
-		all[i] = p
+		all[i] = classify(p)
+	}
+	attachAliases(all)
+	for _, p := range all {
 		byID[p.ID] = p
+	}
+}
+
+func attachAliases(items []Preset) {
+	groups := map[string][]int{}
+	for i, p := range items {
+		if !p.HTTP() || len(p.Needs) > 0 {
+			continue
+		}
+		key := strings.TrimRight(strings.ToLower(p.BaseURL), "/")
+		groups[key] = append(groups[key], i)
+	}
+	for _, idxs := range groups {
+		if len(idxs) < 2 {
+			continue
+		}
+		ids := make([]string, len(idxs))
+		for j, i := range idxs {
+			ids[j] = items[i].ID
+		}
+		sort.Strings(ids)
+		for _, i := range idxs {
+			others := make([]string, 0, len(ids)-1)
+			for _, id := range ids {
+				if id != items[i].ID {
+					others = append(others, id)
+				}
+			}
+			items[i].Aliases = others
+		}
 	}
 }
 

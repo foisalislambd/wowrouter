@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/form';
+import { Input, Textarea } from '@/components/ui/form';
 import { PageHeader, Panel } from '@/components/ui/layout';
 
 interface Preset {
@@ -14,6 +14,10 @@ interface Preset {
   free: boolean;
   models?: string[];
   sources?: string[];
+  supported: boolean;
+  reason?: string;
+  aliases?: string[];
+  needs?: string[];
 }
 
 interface StrategyDoc {
@@ -58,6 +62,11 @@ export function CombosScreen() {
   const [client, setClient] = useState('cursor');
   const [snippet, setSnippet] = useState('');
   const [profile, setProfile] = useState('off');
+  const [vertexID, setVertexID] = useState('');
+  const [projectID, setProjectID] = useState('');
+  const [region, setRegion] = useState('us-central1');
+  const [accessToken, setAccessToken] = useState('');
+  const [serviceAccount, setServiceAccount] = useState('');
 
   useEffect(() => {
     let stop = false;
@@ -97,13 +106,31 @@ export function CombosScreen() {
 
   const shown = useMemo(() => presets.slice(0, 40), [presets]);
 
-  async function install(id: string) {
+  function beginInstall(preset: Preset) {
+    if (preset.needs?.includes('project_id')) {
+      setVertexID(preset.id);
+      setProjectID('');
+      setRegion('us-central1');
+      setAccessToken('');
+      setServiceAccount('');
+      return;
+    }
+    void install(preset.id, {});
+  }
+
+  async function install(id: string, payload: Record<string, string>) {
     setStatus('Installing ' + id + '…');
     try {
-      const body = await admin<{ provider: string; deployment?: string }>('provider-presets/' + id + ':install', {
-        method: 'POST',
-      });
-      setStatus('Installed ' + body.provider + (body.deployment ? ' with deployment ' + body.deployment : '') + '. Paste a key on the provider if it needs one.');
+      const body = await admin<{ provider: string; deployment?: string; base_url?: string; auth_required?: boolean }>(
+        'provider-presets/' + id + ':install',
+        { method: 'POST', body: JSON.stringify(payload) },
+      );
+      const where = body.base_url ? ' at ' + body.base_url : '';
+      const auth = body.auth_required
+        ? ' A Bearer access token or service account JSON is still required before a call succeeds.'
+        : ' Paste a key on the provider if it needs one.';
+      setStatus('Installed ' + body.provider + where + (body.deployment ? ' with deployment ' + body.deployment : '') + '.' + auth);
+      setVertexID('');
     } catch (err) {
       setStatus(err instanceof Error ? err.message : 'Install failed');
     }
@@ -161,18 +188,69 @@ export function CombosScreen() {
           <Input value={query} placeholder="Search openai, ollama, anthropic…" onChange={(e) => setQuery(e.target.value)} />
           <ul className="divide-y divide-line">
             {shown.map((preset) => (
-              <li key={preset.id} className="flex items-center justify-between gap-3 py-2">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="font-medium">{preset.name || preset.id}</span>
-                    {preset.free ? <Badge tone="success">Free</Badge> : null}
-                    <span className="text-xs text-muted">{preset.format}</span>
+              <li key={preset.id} className="flex flex-col gap-2 py-2">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{preset.name || preset.id}</span>
+                      {preset.free ? <Badge tone="success">Free</Badge> : null}
+                      {preset.supported ? null : <Badge tone="warn">Unsupported</Badge>}
+                      {preset.aliases && preset.aliases.length > 0 ? (
+                        <Badge tone="info">Alias of {preset.aliases.join(', ')}</Badge>
+                      ) : null}
+                      <span className="text-xs text-muted">{preset.format}</span>
+                    </div>
+                    {preset.base_url ? <div className="truncate text-xs text-muted">{preset.base_url}</div> : null}
+                    {preset.reason ? <div className="text-xs text-muted">{preset.reason}</div> : null}
                   </div>
-                  <div className="truncate text-xs text-muted">{preset.base_url}</div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={!preset.supported}
+                    disabledReason={preset.supported ? undefined : preset.reason}
+                    onClick={() => beginInstall(preset)}
+                  >
+                    Install
+                  </Button>
                 </div>
-                <Button type="button" size="sm" onClick={() => void install(preset.id)}>
-                  Install
-                </Button>
+                {vertexID === preset.id ? (
+                  <form
+                    className="grid gap-2 rounded-md border border-line bg-sunken p-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void install(preset.id, {
+                        project_id: projectID.trim(),
+                        region: region.trim() || 'us-central1',
+                        access_token: accessToken.trim(),
+                        service_account_json: serviceAccount.trim(),
+                      });
+                    }}
+                  >
+                    <p className="text-xs text-muted">
+                      Project and region build the Vertex URL. Use a service account JSON, or paste an access token. A service account is exchanged when both are filled. Leave both empty to install the URL and add credentials later.
+                    </p>
+                    <label className="flex flex-col gap-1 text-sm">
+                      Project id
+                      <Input value={projectID} onChange={(e) => setProjectID(e.target.value)} required />
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm">
+                      Region
+                      <Input value={region} onChange={(e) => setRegion(e.target.value)} />
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm">
+                      Access token
+                      <Input value={accessToken} onChange={(e) => setAccessToken(e.target.value)} placeholder="ya29…" />
+                    </label>
+                    <label className="flex flex-col gap-1 text-sm">
+                      Service account JSON
+                      <Textarea value={serviceAccount} onChange={(e) => setServiceAccount(e.target.value)} mono placeholder='{"client_email":"…","private_key":"…"}' />
+                    </label>
+                    <div className="flex gap-2">
+                      <Button type="submit" size="sm">Install {preset.name || preset.id}</Button>
+                      <Button type="button" size="sm" variant="secondary" onClick={() => setVertexID('')}>Cancel</Button>
+                    </div>
+                  </form>
+                ) : null}
               </li>
             ))}
           </ul>

@@ -89,15 +89,10 @@ func (s *Server) bridge(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"bridge": "websocket", "path": "/v1/bridge"})
 		return
 	}
-	host := r.RemoteAddr
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || !ip.IsLoopback() {
-		if _, ok := s.authorize(w, r); !ok {
-			return
-		}
+	session, code, msg := s.bridgeSession(r)
+	if code != 0 {
+		writeAPIError(w, code, msg)
+		return
 	}
 	if strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key")) == "" {
 		writeAPIError(w, http.StatusBadRequest, "missing websocket key")
@@ -112,29 +107,16 @@ func (s *Server) bridge(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	defer conn.Close()
 	key := strings.TrimSpace(r.Header.Get("Sec-WebSocket-Key"))
 	sum := sha1.Sum([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
 	accept := base64.StdEncoding.EncodeToString(sum[:])
 	_, _ = bufrw.WriteString("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n")
 	_ = bufrw.Flush()
-	_, _ = conn.Write(wsTextFrame([]byte(`{"type":"ready","service":"wowrouter"}`)))
-}
-
-func wsTextFrame(payload []byte) []byte {
-	frame := []byte{0x81}
-	n := len(payload)
-	switch {
-	case n < 126:
-		frame = append(frame, byte(n))
-	case n <= 65535:
-		frame = append(frame, 126, byte(n>>8), byte(n))
-	default:
-		frame = append(frame, 127,
-			byte(n>>56), byte(n>>48), byte(n>>40), byte(n>>32),
-			byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+	reader := io.Reader(conn)
+	if bufrw.Reader.Buffered() > 0 {
+		reader = io.MultiReader(bufrw.Reader, conn)
 	}
-	return append(frame, payload...)
+	serveBridge(conn, reader, session)
 }
 
 func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {

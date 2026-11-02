@@ -612,6 +612,10 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 	path, payload, headers := ToUpstream(asString(pspec["type"]), body, leaf.Upstream)
 	scrubHeaderMap(headers)
 	keyID, key := e.pickKey(leaf.Provider, pspec, ppriv)
+	key, err := e.googleToken(ctx, pspec, ppriv, key)
+	if err != nil {
+		return 0, nil, nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, JoinUpstream(base, path), bytes.NewReader(payload))
 	if err != nil {
 		return 0, nil, nil, err
@@ -735,6 +739,10 @@ func (e *Engine) dialLeaf(leaf Leaf) (string, string, string, error) {
 		base = defaultBase(asString(pspec["type"]))
 	}
 	_, key := e.pickKey(leaf.Provider, pspec, ppriv)
+	key, err := e.googleToken(context.Background(), pspec, ppriv, key)
+	if err != nil {
+		return "", "", "", err
+	}
 	return base, key, leaf.Upstream, nil
 }
 
@@ -751,6 +759,9 @@ func applyProviderKey(req *http.Request, ptype, authStyle, key string) {
 		return
 	}
 	switch authStyle {
+	case "bearer":
+		req.Header.Set("Authorization", "Bearer "+key)
+		return
 	case "x-api-key":
 		req.Header.Set("x-api-key", key)
 		return
