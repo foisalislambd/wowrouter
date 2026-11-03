@@ -1,7 +1,7 @@
 {
   "name": "wowrouter",
   "private": true,
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Local-first OpenAI-compatible AI router",
   "license": "MIT",
   "homepage": "https://github.com/foisalislambd/wowrouter#readme",
