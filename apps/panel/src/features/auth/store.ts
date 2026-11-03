@@ -225,6 +225,12 @@ export const useLogin = create<LoginState>()((set, get) => ({
       const org = get().organization;
       const step = await authApi.localLogin({ email, password, ...(org ? { organization: org } : {}) });
       rememberOrganization(org);
+      if ((step as { next?: string }).next === 'done') {
+        const me = await authApi.me();
+        useSession.getState().adopt(me);
+        set({ step: { kind: 'done' } });
+        return true;
+      }
       if (step.next === 'enroll_mfa') {
         set({
           step: {

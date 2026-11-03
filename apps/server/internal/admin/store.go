@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/json"
@@ -15,6 +16,9 @@ import (
 	"time"
 
 	"wowrouter/server/internal/gateway"
+	"wowrouter/server/internal/notify"
+	"wowrouter/server/internal/oauth"
+	"wowrouter/server/internal/secret"
 
 	_ "modernc.org/sqlite"
 )
@@ -44,6 +48,8 @@ type Store struct {
 	cacheMu     sync.Mutex
 	cacheExact  map[string]string
 	cacheLoaded bool
+	seal        []byte
+	oauthMu     sync.Mutex
 }
 
 type snapshot struct {
@@ -96,6 +102,76 @@ func Open(path string) (*Store, string, error) {
 	s.logDone = make(chan struct{})
 	go s.logger()
 	return s, token, nil
+}
+
+// UseSeal encrypts the private column with the local AES-GCM key.
+// Existing plaintext rows are rewritten once. A nil key leaves rows readable.
+func (s *Store) UseSeal(key []byte) error {
+	if len(key) != 32 {
+		return fmt.Errorf("secret key must be 32 bytes")
+	}
+	s.mu.Lock()
+	s.seal = append([]byte(nil), key...)
+	s.snap = nil
+	s.mu.Unlock()
+	rows, err := s.db.Query(`SELECT collection, name, private FROM resources`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	type row struct{ collection, name, private string }
+	var pending []row
+	for rows.Next() {
+		var item row
+		if err := rows.Scan(&item.collection, &item.name, &item.private); err != nil {
+			return err
+		}
+		if strings.HasPrefix(item.private, "enc1:") {
+			continue
+		}
+		pending = append(pending, item)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, item := range pending {
+		sealed, err := secret.Seal(key, item.private)
+		if err != nil {
+			return err
+		}
+		if _, err := s.db.Exec(`UPDATE resources SET private = ? WHERE collection = ? AND name = ?`, "enc1:"+sealed, item.collection, item.name); err != nil {
+			return err
+		}
+	}
+	s.mu.Lock()
+	s.snap = nil
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Store) openPrivate(raw string) string {
+	if !strings.HasPrefix(raw, "enc1:") {
+		return raw
+	}
+	if len(s.seal) != 32 {
+		return "{}"
+	}
+	plain, err := secret.Open(s.seal, strings.TrimPrefix(raw, "enc1:"))
+	if err != nil {
+		return "{}"
+	}
+	return plain
+}
+
+func (s *Store) sealPrivate(plain string) (string, error) {
+	if len(s.seal) != 32 {
+		return plain, nil
+	}
+	sealed, err := secret.Seal(s.seal, plain)
+	if err != nil {
+		return "", err
+	}
+	return "enc1:" + sealed, nil
 }
 
 func (s *Store) Close() error {
@@ -174,6 +250,18 @@ CREATE TABLE IF NOT EXISTS cache_entries (
 CREATE TABLE IF NOT EXISTS alerts (
   id TEXT PRIMARY KEY,
   payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS key_cooldowns (
+  provider TEXT NOT NULL,
+  key_id TEXT NOT NULL,
+  until_unix INTEGER NOT NULL,
+  PRIMARY KEY (provider, key_id)
+);
+CREATE TABLE IF NOT EXISTS idempotency (
+  key TEXT PRIMARY KEY,
+  body TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  expires_unix INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS prefs (
   principal TEXT PRIMARY KEY,
@@ -277,7 +365,7 @@ func (s *Store) List(collection string) ([]Resource, error) {
 	defer rows.Close()
 	var out []Resource
 	for rows.Next() {
-		res, err := scanResource(rows)
+		res, err := s.scan(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -290,7 +378,7 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanResource(sc scanner) (Resource, error) {
+func (s *Store) scan(sc scanner) (Resource, error) {
 	var res Resource
 	var spec, private string
 	if err := sc.Scan(&res.Name, &spec, &private, &res.ETag, &res.Generation, &res.CreatedAt, &res.UpdatedAt, &res.ManagedBy); err != nil {
@@ -299,7 +387,7 @@ func scanResource(sc scanner) (Resource, error) {
 	res.Spec = map[string]any{}
 	res.Private = map[string]any{}
 	_ = json.Unmarshal([]byte(spec), &res.Spec)
-	_ = json.Unmarshal([]byte(private), &res.Private)
+	_ = json.Unmarshal([]byte(s.openPrivate(private)), &res.Private)
 	if res.Spec == nil {
 		res.Spec = map[string]any{}
 	}
@@ -311,7 +399,7 @@ func scanResource(sc scanner) (Resource, error) {
 
 func (s *Store) Get(collection, name string) (Resource, error) {
 	row := s.db.QueryRow(`SELECT name, spec, private, etag, generation, created_at, updated_at, managed_by FROM resources WHERE collection = ? AND name = ?`, collection, name)
-	res, err := scanResource(row)
+	res, err := s.scan(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Resource{}, ErrNotFound
 	}
@@ -358,7 +446,11 @@ func (s *Store) Put(collection, name string, spec map[string]any, ifMatch string
 		delete(publicAny, "secret_sha256")
 	}
 	pub, _ := json.Marshal(publicAny)
-	priv, _ := json.Marshal(full)
+	privJSON, _ := json.Marshal(full)
+	priv, err := s.sealPrivate(string(privJSON))
+	if err != nil {
+		return Resource{}, err
+	}
 	_, err = s.db.Exec(`INSERT INTO resources(collection, name, spec, private, etag, generation, created_at, updated_at, managed_by)
 		VALUES(?, ?, ?, ?, ?, ?, ?, ?, 'api')
 		ON CONFLICT(collection, name) DO UPDATE SET spec = excluded.spec, private = excluded.private, etag = excluded.etag, generation = excluded.generation, updated_at = excluded.updated_at`,
@@ -812,6 +904,168 @@ func (s *Store) PutAlert(a map[string]any) {
 	}
 	raw, _ := json.Marshal(a)
 	_, _ = s.db.Exec(`INSERT INTO alerts(id, payload) VALUES(?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload`, id, string(raw))
+	go s.deliverAlert(a)
+}
+
+// SaveOAuth stores a subscription token on a provider and uses it as that provider's key.
+func (s *Store) SaveOAuth(provider, access, refresh string, exp time.Time) error {
+	spec := map[string]any{}
+	if res, err := s.Get("providers", provider); err == nil {
+		spec = cloneMap(res.Private)
+		if len(spec) == 0 {
+			spec = cloneMap(res.Spec)
+		}
+	}
+	if spec == nil {
+		spec = map[string]any{}
+	}
+	spec["oauth"] = map[string]any{
+		"access_token": access, "refresh_token": refresh, "expires_at": exp.UTC().Format(time.RFC3339),
+	}
+	auth := asMap(spec["auth"])
+	if auth == nil {
+		auth = map[string]any{}
+	}
+	auth["api_key"] = access
+	spec["auth"] = auth
+	if spec["enabled"] == nil {
+		spec["enabled"] = true
+	}
+	_, err := s.Put("providers", provider, spec, "", true)
+	return err
+}
+
+// EnsureFreshToken refreshes a subscription token that is missing or due within a minute.
+// The new access token is stored as the provider key. A provider with no refresh token is left alone.
+func (s *Store) EnsureFreshToken(provider string) (string, bool) {
+	if s == nil || provider == "" {
+		return "", false
+	}
+	s.oauthMu.Lock()
+	defer s.oauthMu.Unlock()
+	res, err := s.Get("providers", provider)
+	if err != nil {
+		return "", false
+	}
+	row := asMap(res.Private["oauth"])
+	refresh := asString(row["refresh_token"])
+	if refresh == "" {
+		return "", false
+	}
+	if exp, err := time.Parse(time.RFC3339, asString(row["expires_at"])); err == nil && time.Until(exp) > time.Minute {
+		return "", false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	result, err := oauth.Refresh(ctx, provider, refresh, nil)
+	if err != nil || result.AccessToken == "" {
+		return "", false
+	}
+	if result.RefreshToken == "" {
+		result.RefreshToken = refresh
+	}
+	if result.ExpiresAt.IsZero() {
+		result.ExpiresAt = time.Now().Add(time.Hour)
+	}
+	if err := s.SaveOAuth(provider, result.AccessToken, result.RefreshToken, result.ExpiresAt); err != nil {
+		return "", false
+	}
+	return result.AccessToken, true
+}
+
+// Cooldown is one persisted credential pause.
+type Cooldown struct {
+	Provider string
+	KeyID    string
+	Until    int64
+}
+
+// SaveKeyCooldown records a credential pause so a restart still skips it.
+func (s *Store) SaveKeyCooldown(provider, keyID string, until time.Time) {
+	if s == nil || provider == "" || keyID == "" || until.IsZero() {
+		return
+	}
+	_, _ = s.db.Exec(`INSERT INTO key_cooldowns(provider, key_id, until_unix) VALUES(?, ?, ?)
+		ON CONFLICT(provider, key_id) DO UPDATE SET until_unix = excluded.until_unix`, provider, keyID, until.Unix())
+}
+
+// KeyCooldowns returns pauses that have not expired yet.
+func (s *Store) KeyCooldowns() []Cooldown {
+	if s == nil {
+		return nil
+	}
+	now := time.Now().Unix()
+	_, _ = s.db.Exec(`DELETE FROM key_cooldowns WHERE until_unix <= ?`, now)
+	rows, err := s.db.Query(`SELECT provider, key_id, until_unix FROM key_cooldowns WHERE until_unix > ?`, now)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []Cooldown
+	for rows.Next() {
+		var item Cooldown
+		if rows.Scan(&item.Provider, &item.KeyID, &item.Until) != nil {
+			continue
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+// Idempotent returns a stored response for a client retry key.
+func (s *Store) Idempotent(key string) (int, []byte, bool) {
+	if s == nil || key == "" {
+		return 0, nil, false
+	}
+	var status int
+	var body string
+	var exp int64
+	err := s.db.QueryRow(`SELECT status, body, expires_unix FROM idempotency WHERE key = ?`, key).Scan(&status, &body, &exp)
+	if err != nil || time.Now().Unix() > exp {
+		return 0, nil, false
+	}
+	return status, []byte(body), true
+}
+
+// SaveIdempotent keeps a successful response for five minutes. Bodies over 1 MiB are skipped.
+func (s *Store) SaveIdempotent(key string, status int, body []byte) {
+	if s == nil || key == "" || status >= 500 || len(body) == 0 || len(body) > 1<<20 {
+		return
+	}
+	_, _ = s.db.Exec(`INSERT INTO idempotency(key, body, status, expires_unix) VALUES(?, ?, ?, ?)
+		ON CONFLICT(key) DO UPDATE SET body = excluded.body, status = excluded.status, expires_unix = excluded.expires_unix`,
+		key, string(body), status, time.Now().Add(5*time.Minute).Unix())
+}
+
+func (s *Store) deliverAlert(a map[string]any) {
+	channels, err := s.List("alerts/channels")
+	if err != nil {
+		return
+	}
+	msg := notify.Message{
+		ID: asString(a["id"]), Title: asString(a["title"]), Body: asString(a["message"]),
+		Severity: asString(a["severity"]), At: asString(a["at"]),
+	}
+	if msg.Title == "" {
+		msg.Title = "WowRouter alert"
+	}
+	for _, ch := range channels {
+		if ch.Spec["enabled"] == false {
+			continue
+		}
+		url := asString(ch.Private["url"])
+		if url == "" {
+			url = asString(ch.Spec["url"])
+		}
+		if err := gateway.SafeHTTPURL(url); err != nil {
+			continue
+		}
+		secret := asString(ch.Private["signing_secret"])
+		if secret == "" {
+			secret = asString(ch.Private["secret"])
+		}
+		_ = notify.Post(nil, notify.Channel{Name: ch.Name, URL: url, Secret: secret}, msg)
+	}
 }
 
 func (s *Store) Alerts() []map[string]any {
@@ -896,7 +1150,7 @@ func (s *Store) view() *snapshot {
 		res.Spec = map[string]any{}
 		res.Private = map[string]any{}
 		_ = json.Unmarshal([]byte(spec), &res.Spec)
-		_ = json.Unmarshal([]byte(private), &res.Private)
+		_ = json.Unmarshal([]byte(s.openPrivate(private)), &res.Private)
 		if res.Spec == nil {
 			res.Spec = map[string]any{}
 		}

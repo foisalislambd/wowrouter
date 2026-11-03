@@ -29,7 +29,28 @@ curl http://127.0.0.1:8787/v1/chat/completions \
   -d "{\"model\":\"openai/gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}"
 ```
 
-Streaming works the same way as OpenAI: set `"stream": true`. Tools and the usual chat fields are forwarded to providers that speak the OpenAI chat API.
+Streaming works the same way as OpenAI: set `"stream": true`. Tools, tool results, and `cache_control` on content blocks are translated for Anthropic and Gemini providers. OpenAI-compatible providers receive the body unchanged.
+
+## Responses
+
+Codex and other Responses clients use `POST /v1/responses`. The body uses `input` and `instructions`. The router turns that into a chat request and returns a Responses object, including streamed `response.output_text.delta` events. A chat call may send `Idempotency-Key`. The same key returns the stored response for five minutes, including after a restart, for bodies up to 1 MiB.
+
+```bash
+curl http://127.0.0.1:8787/v1/responses \
+  -H "Authorization: Bearer sk-wowrouter-..." \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"openai/gpt-4o-mini\",\"input\":\"Hello\"}"
+```
+
+A repeated chat call can send `Idempotency-Key`. The same key within five minutes returns the first response.
+
+## Embeddings, audio, moderations, search, batches
+
+`POST /v1/embeddings`, `POST /v1/audio/speech`, `POST /v1/audio/transcriptions`, `POST /v1/audio/translations`, and `POST /v1/moderations` forward to the provider selected by `model`.
+
+`POST /v1/search` takes `query` and `model` and runs one chat turn.
+
+`POST /v1/batches` accepts `{ "requests": [ { "custom_id": "1", "model": "openai/gpt-4o-mini", "messages": [...] } ] }` and runs each line before answering. `GET /v1/batches/{id}` returns that result.
 
 The model id must include the provider slug. `gpt-4o-mini` alone is not enough. Use `openai/gpt-4o-mini`.
 

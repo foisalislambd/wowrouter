@@ -78,26 +78,83 @@ func itoa(n int) string {
 }
 
 func (e *Engine) pickKey(provider string, spec, priv map[string]any) (id, secret string) {
+	if access, ok := freshToken(e, provider); ok && access != "" {
+		priv = overlayKey(priv, access)
+	}
 	slots := collectKeys(spec, priv)
 	if len(slots) == 0 {
 		return "", ""
 	}
-	if e == nil || e.Breakers == nil || len(slots) == 1 && !e.cooled(provider, slots[0].ID) {
-		return slots[0].ID, slots[0].Secret
+	strategy := asString(spec["account_strategy"])
+	if strategy == "" {
+		strategy = asString(priv["account_strategy"])
 	}
-	ids := make([]string, len(slots))
-	by := make(map[string]string, len(slots))
-	for i, slot := range slots {
-		ids[i] = slot.ID
-		by[slot.ID] = slot.Secret
+	live := make([]keySlot, 0, len(slots))
+	for _, slot := range slots {
+		if e.cooled(provider, slot.ID) {
+			continue
+		}
+		live = append(live, slot)
 	}
-	chosen, ok := e.Breakers.NextKey(provider, ids)
-	if !ok {
+	if len(live) == 0 {
 		return "", ""
 	}
-	return chosen, by[chosen]
+	switch strategy {
+	case "", "round-robin", "least-used", "p2c":
+		if e == nil || e.Breakers == nil {
+			return live[0].ID, live[0].Secret
+		}
+		ids := make([]string, len(live))
+		by := make(map[string]string, len(live))
+		for i, slot := range live {
+			ids[i] = slot.ID
+			by[slot.ID] = slot.Secret
+		}
+		chosen, ok := e.Breakers.NextKey(provider, ids)
+		if !ok {
+			return "", ""
+		}
+		return chosen, by[chosen]
+	case "random", "strict-random":
+		n := 0
+		if e != nil && e.Breakers != nil {
+			n = e.Breakers.TakeCursor(provider)
+		}
+		slot := live[n%len(live)]
+		return slot.ID, slot.Secret
+	default:
+		// fill-first and priority stay on the first live account.
+		return live[0].ID, live[0].Secret
+	}
 }
 
 func (e *Engine) cooled(provider, id string) bool {
 	return e != nil && e.Breakers != nil && e.Breakers.KeyCooling(provider, id)
+}
+
+func freshToken(e *Engine, provider string) (string, bool) {
+	if e == nil || e.Cat == nil || provider == "" {
+		return "", false
+	}
+	keeper, ok := e.Cat.(interface {
+		EnsureFreshToken(string) (string, bool)
+	})
+	if !ok {
+		return "", false
+	}
+	return keeper.EnsureFreshToken(provider)
+}
+
+func overlayKey(priv map[string]any, access string) map[string]any {
+	out := map[string]any{}
+	for k, v := range priv {
+		out[k] = v
+	}
+	auth := map[string]any{}
+	for k, v := range asMap(out["auth"]) {
+		auth[k] = v
+	}
+	auth["api_key"] = access
+	out["auth"] = auth
+	return out
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"wowrouter/server/internal/combo"
+	"wowrouter/server/internal/wire"
 )
 
 type Call struct {
@@ -90,6 +91,14 @@ func (e *Engine) resolveModel(name string) (map[string]any, bool) {
 		}
 		return spec, true
 	}
+	for _, res := range e.Cat.Resources("models") {
+		if res.Spec["enabled"] == false {
+			continue
+		}
+		if aliasMatches(res.Spec["aliases"], name) || aliasMatches(res.Private["aliases"], name) {
+			return res.Spec, true
+		}
+	}
 	provider, upstream, ok := splitDirect(name)
 	if !ok {
 		return nil, false
@@ -123,6 +132,15 @@ func splitDirect(name string) (string, string, bool) {
 func (e *Engine) Handle(call Call) Outcome {
 	started := e.Now()
 	out := Outcome{Status: http.StatusBadGateway, Model: call.Model}
+	if reason, blocked := e.pluginBlock(call); blocked {
+		out.Status = http.StatusForbidden
+		out.Blocked = true
+		out.Error = reason
+		out.Body = errorBody(reason)
+		out.Latency = e.Now().Sub(started)
+		e.log(call, out, nil)
+		return out
+	}
 	text := MessageText(call.Body)
 	if safety := e.setting("safety"); safety != nil {
 		if _, blocked := guardPrompt(text, safety); blocked {
@@ -608,8 +626,9 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 	if e.Breakers != nil && !e.Breakers.ModelAllowed(leaf.Provider, leaf.Upstream) {
 		return 0, nil, nil, fmt.Errorf("model %s is locked", leaf.Upstream)
 	}
-	wantStream := body["stream"] == true && openaiCompatible(asString(pspec["type"]))
-	path, payload, headers := ToUpstream(asString(pspec["type"]), body, leaf.Upstream)
+	ptype := asString(pspec["type"])
+	wantStream := body["stream"] == true
+	path, payload, headers := ToUpstream(ptype, body, leaf.Upstream)
 	scrubHeaderMap(headers)
 	keyID, key := e.pickKey(leaf.Provider, pspec, ppriv)
 	key, err := e.googleToken(ctx, pspec, ppriv, key)
@@ -623,7 +642,6 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	ptype := asString(pspec["type"])
 	applyProviderKey(req, ptype, asString(pspec["auth_style"]), key)
 	client := *e.HTTP
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
@@ -646,7 +664,11 @@ func (e *Engine) callUpstreamEx(ctx context.Context, leaf Leaf, body map[string]
 		e.Breakers.LockModel(leaf.Provider, leaf.Upstream, 2*time.Minute)
 	}
 	if wantStream && resp.StatusCode < 400 && strings.Contains(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
-		return resp.StatusCode, nil, resp.Body, nil
+		stream := resp.Body
+		if ptype == "anthropic" || ptype == "anthropic_compatible" || ptype == "gemini" {
+			stream = wire.ProviderSSE(ptype, resp.Body)
+		}
+		return resp.StatusCode, nil, stream, nil
 	}
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	resp.Body.Close()
@@ -831,27 +853,63 @@ func normalizeUpstream(ptype, model string, raw []byte) []byte {
 	if json.Unmarshal(raw, &body) != nil {
 		return raw
 	}
-	text := ""
+	var out map[string]any
 	switch ptype {
 	case "anthropic", "anthropic_compatible":
-		for _, block := range asSlice(body["content"]) {
-			text += asString(asMap(block)["text"])
-		}
+		out = wire.AnthropicToOpenAI(body, model)
 	case "gemini":
-		for _, cand := range asSlice(body["candidates"]) {
-			for _, part := range asSlice(asMap(asMap(cand)["content"])["parts"]) {
-				text += asString(asMap(part)["text"])
+		out = wire.GeminiToOpenAI(body, model)
+	default:
+		return raw
+	}
+	encoded, err := json.Marshal(out)
+	if err != nil {
+		return raw
+	}
+	return encoded
+}
+
+func (e *Engine) pluginBlock(call Call) (string, bool) {
+	if e == nil || e.Cat == nil {
+		return "", false
+	}
+	for _, plugin := range e.Cat.Resources("plugins") {
+		if plugin.Spec["enabled"] == false {
+			continue
+		}
+		if asString(plugin.Spec["type"]) != "block_model" {
+			continue
+		}
+		if asString(plugin.Spec["model"]) == call.Model {
+			reason := asString(plugin.Spec["reason"])
+			if reason == "" {
+				reason = "blocked by plugin " + plugin.Name
+			}
+			return reason, true
+		}
+	}
+	return "", false
+}
+
+func aliasMatches(raw any, name string) bool {
+	switch v := raw.(type) {
+	case map[string]any:
+		if _, ok := v[name]; ok {
+			return true
+		}
+		for _, item := range v {
+			if asString(item) == name {
+				return true
+			}
+		}
+	case []any:
+		for _, item := range v {
+			if asString(item) == name {
+				return true
 			}
 		}
 	}
-	if text == "" {
-		return raw
-	}
-	out, _ := json.Marshal(map[string]any{
-		"id": "chatcmpl-wowrouter", "object": "chat.completion", "model": model,
-		"choices": []any{map[string]any{"index": 0, "message": map[string]any{"role": "assistant", "content": text}, "finish_reason": "stop"}},
-	})
-	return out
+	return false
 }
 
 func defaultBase(ptype string) string {

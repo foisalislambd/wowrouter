@@ -69,13 +69,21 @@ func Run(args []string) int {
 		return 0
 	case "configure":
 		if len(args) < 2 {
-			fmt.Println("usage: wowrouter configure <claude|codex|cursor|cline|opencode|copilot>")
+			fmt.Println("usage: wowrouter configure <claude|codex|cursor|cline|opencode|copilot> [--write path]")
 			return 2
 		}
 		file, body, ok := clients.Snippet(args[1], base, tokenOr(token))
 		if !ok {
 			fmt.Println("unknown client")
 			return 2
+		}
+		if len(args) >= 4 && args[2] == "--write" {
+			if err := os.WriteFile(args[3], []byte(body), 0o600); err != nil {
+				fmt.Println(err)
+				return 1
+			}
+			fmt.Println("wrote", args[3])
+			return 0
 		}
 		fmt.Printf("# %s\n%s", file, body)
 		return 0

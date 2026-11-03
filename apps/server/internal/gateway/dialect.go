@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/url"
 	"strings"
+
+	"wowrouter/server/internal/wire"
 )
 
 // ToOpenAI converts an Anthropic, Gemini, or Bedrock request into an OpenAI chat body.
@@ -14,21 +16,9 @@ func ToOpenAI(dialect, model string, raw []byte) (map[string]any, error) {
 	}
 	switch dialect {
 	case "anthropic":
-		out := map[string]any{"model": firstNonEmpty(model, asString(body["model"])), "messages": anthropicMessages(body)}
-		if body["max_tokens"] != nil {
-			out["max_tokens"] = body["max_tokens"]
-		}
-		if body["stream"] != nil {
-			out["stream"] = body["stream"]
-		}
-		if sys := asString(body["system"]); sys != "" {
-			msgs := asSlice(out["messages"])
-			out["messages"] = append([]any{map[string]any{"role": "system", "content": sys}}, msgs...)
-		}
-		return out, nil
+		return wire.AnthropicToOpenAIRequest(body, model), nil
 	case "gemini":
-		out := map[string]any{"model": model, "messages": geminiMessages(body)}
-		return out, nil
+		return wire.GeminiToOpenAIRequest(body, model), nil
 	case "bedrock":
 		out := map[string]any{"model": model, "messages": bedrockMessages(body)}
 		return out, nil
@@ -44,19 +34,9 @@ func FromOpenAI(dialect, model string, payload []byte) []byte {
 	text := ResponseText(payload)
 	switch dialect {
 	case "anthropic":
-		raw, _ := json.Marshal(map[string]any{
-			"id": "msg_wowrouter", "type": "message", "role": "assistant", "model": model,
-			"content":     []any{map[string]any{"type": "text", "text": text}},
-			"stop_reason": "end_turn",
-		})
-		return raw
+		return openAIChatToAnthropicMessage(model, payload, text)
 	case "gemini":
-		raw, _ := json.Marshal(map[string]any{
-			"candidates": []any{map[string]any{
-				"content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": text}}},
-			}},
-		})
-		return raw
+		return openAIChatToGemini(text)
 	case "bedrock":
 		raw, _ := json.Marshal(map[string]any{
 			"output": map[string]any{"message": map[string]any{
@@ -132,6 +112,49 @@ func bedrockMessages(body map[string]any) []any {
 	return out
 }
 
+func openAIChatToAnthropicMessage(model string, payload []byte, text string) []byte {
+	var body map[string]any
+	_ = json.Unmarshal(payload, &body)
+	msg := map[string]any{}
+	if choices := asSlice(body["choices"]); len(choices) > 0 {
+		msg = asMap(asMap(choices[0])["message"])
+	}
+	var blocks []any
+	if text != "" {
+		blocks = append(blocks, map[string]any{"type": "text", "text": text})
+	}
+	for _, call := range asSlice(msg["tool_calls"]) {
+		cm := asMap(call)
+		fn := asMap(cm["function"])
+		var input any
+		if json.Unmarshal([]byte(asString(fn["arguments"])), &input) != nil {
+			input = map[string]any{}
+		}
+		blocks = append(blocks, map[string]any{"type": "tool_use", "id": asString(cm["id"]), "name": asString(fn["name"]), "input": input})
+	}
+	if len(blocks) == 0 {
+		blocks = []any{map[string]any{"type": "text", "text": text}}
+	}
+	stop := "end_turn"
+	if len(asSlice(msg["tool_calls"])) > 0 {
+		stop = "tool_use"
+	}
+	raw, _ := json.Marshal(map[string]any{
+		"id": "msg_wowrouter", "type": "message", "role": "assistant", "model": model,
+		"content": blocks, "stop_reason": stop,
+	})
+	return raw
+}
+
+func openAIChatToGemini(text string) []byte {
+	raw, _ := json.Marshal(map[string]any{
+		"candidates": []any{map[string]any{
+			"content": map[string]any{"role": "model", "parts": []any{map[string]any{"text": text}}},
+		}},
+	})
+	return raw
+}
+
 func urlEscape(s string) string { return url.PathEscape(s) }
 
 func firstNonEmpty(values ...string) string {
@@ -147,11 +170,6 @@ func firstNonEmpty(values ...string) string {
 func ToUpstream(providerType string, body map[string]any, upstreamModel string) (path string, payload []byte, headers map[string]string) {
 	body = cloneMap(body)
 	keepStream := body["stream"] == true
-	switch providerType {
-	case "anthropic", "anthropic_compatible", "gemini":
-		delete(body, "stream")
-		keepStream = false
-	}
 	body["model"] = upstreamModel
 	headers = map[string]string{"Content-Type": "application/json", "Accept": "application/json"}
 	if keepStream {
@@ -160,30 +178,7 @@ func ToUpstream(providerType string, body map[string]any, upstreamModel string) 
 	switch providerType {
 	case "anthropic", "anthropic_compatible":
 		path = "/v1/messages"
-		anth := map[string]any{
-			"model": upstreamModel, "max_tokens": 1024, "messages": []any{},
-		}
-		if body["max_tokens"] != nil {
-			anth["max_tokens"] = body["max_tokens"]
-		}
-		var msgs []any
-		var system string
-		for _, item := range asSlice(body["messages"]) {
-			m := asMap(item)
-			if asString(m["role"]) == "system" {
-				if system != "" {
-					system += "\n"
-				}
-				system += asString(m["content"])
-				continue
-			}
-			msgs = append(msgs, map[string]any{"role": asString(m["role"]), "content": asString(m["content"])})
-		}
-		if system != "" {
-			anth["system"] = system
-		}
-		anth["messages"] = msgs
-		payload, _ = json.Marshal(anth)
+		payload, _ = json.Marshal(wire.OpenAIToAnthropic(body, upstreamModel))
 		headers["anthropic-version"] = "2023-06-01"
 		return path, payload, headers
 	case "azure", "azure_openai":
@@ -191,17 +186,14 @@ func ToUpstream(providerType string, body map[string]any, upstreamModel string) 
 		payload, _ = json.Marshal(body)
 		return path, payload, headers
 	case "gemini":
-		path = "/models/" + upstreamModel + ":generateContent"
-		var contents []any
-		for _, item := range asSlice(body["messages"]) {
-			m := asMap(item)
-			role := asString(m["role"])
-			if role == "assistant" {
-				role = "model"
-			}
-			contents = append(contents, map[string]any{"role": role, "parts": []any{map[string]any{"text": asString(m["content"])}}})
+		method := "generateContent"
+		if keepStream {
+			method = "streamGenerateContent"
+			path = "/models/" + upstreamModel + ":" + method + "?alt=sse"
+		} else {
+			path = "/models/" + upstreamModel + ":" + method
 		}
-		payload, _ = json.Marshal(map[string]any{"contents": contents})
+		payload, _ = json.Marshal(wire.OpenAIToGemini(body))
 		return path, payload, headers
 	default:
 		path = "/chat/completions"

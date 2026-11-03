@@ -15,6 +15,7 @@ import (
 	"wowrouter/server/internal/admin"
 	"wowrouter/server/internal/httpapi"
 	"wowrouter/server/internal/migrate"
+	"wowrouter/server/internal/secret"
 )
 
 type Options struct {
@@ -54,6 +55,11 @@ func Run(ctx context.Context, opt Options) error {
 		return err
 	}
 	defer gatewayDB.Close()
+	if key, err := secret.LoadKey(opt.DataDir); err != nil {
+		return err
+	} else if err := gatewayDB.UseSeal(key); err != nil {
+		return err
+	}
 	if err := migrate.Apply(gatewayDB, opt.DataDir, sources); err != nil {
 		return err
 	}

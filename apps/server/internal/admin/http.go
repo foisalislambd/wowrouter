@@ -29,7 +29,7 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (a *API) public(path string) bool {
 	switch path {
-	case "auth/login_options", "auth/session", "auth/logout", "health", "openapi.json":
+	case "auth/login_options", "auth/session", "auth/logout", "auth/local/login", "health", "openapi.json":
 		return true
 	default:
 		return false
@@ -61,6 +61,10 @@ func (a *API) route(w http.ResponseWriter, r *http.Request, path string) {
 		a.loginOptions(w, r)
 	case path == "auth/session" && r.Method == http.MethodPost:
 		a.session(w, r)
+	case path == "auth/local/login" && r.Method == http.MethodPost:
+		a.localLogin(w, r)
+	case path == "auth/password" && (r.Method == http.MethodGet || r.Method == http.MethodPut || r.Method == http.MethodPost):
+		a.passwordSettings(w, r)
 	case path == "auth/logout" && r.Method == http.MethodPost:
 		if c, err := r.Cookie("wowrouter_session"); err == nil {
 			a.Store.DeleteSession(c.Value)
@@ -108,9 +112,9 @@ func (a *API) route(w http.ResponseWriter, r *http.Request, path string) {
 	case path == "reports/guardrails/summary" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": nil})
 	case path == "reports/spend/summary" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": nil})
+		writeJSON(w, http.StatusOK, map[string]any{"items": a.Store.SpendSummary(), "next_cursor": nil})
 	case path == "reports/spend/ledger" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": nil})
+		writeJSON(w, http.StatusOK, map[string]any{"items": a.Store.SpendLedger(), "next_cursor": nil})
 	case path == "logs" && r.Method == http.MethodGet:
 		a.logs(w, r)
 	case strings.HasPrefix(path, "logs/") && r.Method == http.MethodGet && !strings.Contains(path, "views"):
@@ -189,7 +193,11 @@ func (a *API) route(w http.ResponseWriter, r *http.Request, path string) {
 	case path == "budgets/overage_requests" && r.Method == http.MethodGet:
 		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": nil})
 	case path == "cache/entries" && r.Method == http.MethodGet:
-		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "next_cursor": nil})
+		writeJSON(w, http.StatusOK, map[string]any{"items": a.Store.CacheEntries(100), "next_cursor": nil})
+	case path == "runtime/mitm" && r.Method == http.MethodGet:
+		a.mitmStatus(w, r)
+	case path == "runtime/mitm" && r.Method == http.MethodPost:
+		a.mitmStart(w, r)
 	case path == "pricing/deployments" && r.Method == http.MethodGet:
 		a.prices(w)
 	case path == "roles" && r.Method == http.MethodGet:
@@ -245,6 +253,8 @@ func (a *API) action(w http.ResponseWriter, r *http.Request, path string) bool {
 		a.changeAction(w, r, strings.TrimPrefix(base, "change_requests/"), act)
 	case strings.HasPrefix(base, "keys/") && act == "rotate":
 		a.rotateKey(w, strings.TrimPrefix(base, "keys/"))
+	case strings.HasPrefix(base, "alerts/channels/") && act == "test":
+		a.testChannel(w, strings.TrimPrefix(base, "alerts/channels/"))
 	default:
 		return false
 	}
@@ -428,20 +438,6 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request, name string) {
 	}
 }
 
-func (a *API) loginOptions(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"methods":              []any{map[string]any{"type": "token", "id": "token", "display_name": "Admin token"}},
-		"password_reset":       false,
-		"organization":         nil,
-		"version":              a.Version,
-		"ticker":               nil,
-		"trusted_device":       map[string]any{"enabled": false, "max_age_days": nil},
-		"password":             nil,
-		"setup_required":       true,
-		"device_authorization": false,
-	})
-}
-
 func (a *API) session(w http.ResponseWriter, r *http.Request) {
 	var body map[string]any
 	if err := readBody(r, &body); err != nil {
@@ -449,17 +445,9 @@ func (a *API) session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	token := asString(body["token"])
-	if !a.Store.BootstrapMatches(token) {
-		writeErr(w, http.StatusUnauthorized, "unauthenticated", "That token didn't work.")
-		return
-	}
-	raw, err := a.Store.CreateSession()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
-		return
-	}
-	http.SetCookie(w, &http.Cookie{Name: "wowrouter_session", Value: raw, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode})
-	writeJSON(w, http.StatusOK, me())
+	password := asString(body["password"])
+	email := asString(body["email"])
+	a.acceptLogin(w, token, email, password, clientIP(r))
 }
 
 func (a *API) preferences(w http.ResponseWriter, r *http.Request) {

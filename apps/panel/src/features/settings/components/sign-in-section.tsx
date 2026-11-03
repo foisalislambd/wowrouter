@@ -14,6 +14,8 @@ import { scopeOrganization, useScope } from '@/stores/scope';
 import { notify } from '@/stores/ui';
 import { SETTINGS_DEFAULTS } from '@/lib/settings-defaults';
 
+import { API_BASE } from '@/lib/api/client';
+
 import { settingsApi, type UserResource } from '../api';
 import { deepMerge, durationOptions, rangeError } from '../choices';
 import { detailErrors, DURATION_RE, mergePatch, same } from '../form-errors';
@@ -23,6 +25,75 @@ import { Advanced } from './settings-form';
 import { TestSignInOutcome } from './test-sign-in-outcome';
 
 type Factor = 'totp' | 'webauthn';
+
+/** Sets the single console password. The gateway stores a hash and leaves this off until enabled. */
+function PasswordFields() {
+  const [email, setEmail] = useState('admin@localhost');
+  const [password, setPassword] = useState('');
+  const [current, setCurrent] = useState('');
+  const [enabled, setEnabled] = useState(false);
+  const [note, setNote] = useState('');
+
+  useEffect(() => {
+    void fetch(`${API_BASE}/auth/password`, { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((body: { enabled?: boolean; email?: string } | null) => {
+        if (!body) return;
+        setEnabled(Boolean(body.enabled));
+        if (body.email) setEmail(body.email);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  async function save(turnOn: boolean) {
+    setNote('');
+    const res = await fetch(`${API_BASE}/auth/password`, {
+      method: 'PUT',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: turnOn,
+        email,
+        password,
+        current_password: current,
+      }),
+    });
+    if (!res.ok) {
+      const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+      setNote(body?.error?.message ?? 'Could not save the password.');
+      return;
+    }
+    setPassword('');
+    setCurrent('');
+    setEnabled(turnOn);
+    setNote(turnOn ? 'Password sign-in is on.' : 'Password sign-in is off.');
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-control border border-line px-3 py-3">
+      <Field label="Email">
+        <Input value={email} autoComplete="username" onChange={(e) => setEmail(e.target.value)} />
+      </Field>
+      <Field label="New password" hint="At least 12 characters. Leave blank to keep the current password.">
+        <Input type="password" value={password} autoComplete="new-password" onChange={(e) => setPassword(e.target.value)} />
+      </Field>
+      <Field label="Current password" hint="Required only when a password is already set.">
+        <Input type="password" value={current} autoComplete="current-password" onChange={(e) => setCurrent(e.target.value)} />
+      </Field>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="rounded-sm bg-accent px-3 py-1.5 text-ui text-canvas" onClick={() => void save(true)}>
+          {enabled ? 'Update password' : 'Turn on password sign-in'}
+        </button>
+        {enabled ? (
+          <button type="button" className="rounded-sm border border-line px-3 py-1.5 text-ui" onClick={() => void save(false)}>
+            Turn off
+          </button>
+        ) : null}
+      </div>
+      {note ? <p className="text-caption text-muted">{note}</p> : null}
+    </div>
+  );
+}
 
 interface PolicyValues {
   local: boolean;
@@ -325,7 +396,7 @@ function PolicyForm({
             label="Let people sign in with an email and password"
           />
           <p className="text-caption text-muted">
-            Password accounts always ask for a second step. Admin tokens keep working either way.
+            Off until you set a password in the console password card. Admin tokens keep working either way. Password sign-in on this gateway does not ask for a second step.
           </p>
           {errors.local ? (
             <p role="alert" className="text-caption text-error">
@@ -720,7 +791,7 @@ export function SignInSection() {
     const A = SETTINGS_DEFAULTS.auth.admin;
     return {
       local: local?.enabled ?? A.local.enabled,
-      orgLocal: organization.data.spec.local_login ?? true,
+      orgLocal: organization.data.spec.local_login ?? false,
       factors: local?.mfa?.factors ?? [...A.local.mfa.factors],
       minLength: String(policy?.min_length ?? SETTINGS_DEFAULTS.auth.admin.local.password_policy.min_length),
       history: String(policy?.history ?? SETTINGS_DEFAULTS.auth.admin.local.password_policy.history),
@@ -764,6 +835,13 @@ export function SignInSection() {
         <LoadError of={auth} subject="Sign-in settings" size="sm" />
         {auth.status === 'loading' && !auth.data ? <LoadingRows rows={4} /> : null}
         <div className="flex flex-col gap-5">
+          <div className="flex flex-col gap-2">
+            <h3 className="text-ui font-semibold text-fg">Console password</h3>
+            <p className="text-caption text-muted">
+              Password sign-in is off until you turn it on here. The password is stored as a hash. The bootstrap token still works.
+            </p>
+            <PasswordFields />
+          </div>
           {usersError ? null : <Coverage users={users} />}
           {initial && auth.data ? (
             <PolicyForm

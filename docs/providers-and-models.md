@@ -19,8 +19,18 @@ A provider can hold several accounts. On the provider page, add each key or sess
 
 | Order | What happens |
 | --- | --- |
-| Fill first | The lowest priority number is used until that call fails. The next enabled account is tried in the same request. |
-| Round robin | Calls spread across the enabled accounts. The one used least recently goes first. |
+| Fill first | The first enabled account that is not cooling down is used. A 429, 401, or 403 cools that account before the next call. |
+| Priority | Same as fill first. Account order on the page is the priority. |
+| Round robin | Calls spread across the enabled accounts that are not cooling down. |
+| Random | Each call picks a live account. |
+
+The strategy is read on every call. Saving it and leaving the gateway on round robin was a bug; that is fixed. A cooldown from a 429, 401, or 403 is written to the local database and applied again after a restart.
+
+Anthropic rate-limit headers (`anthropic-ratelimit-*-remaining`) update the quota the combo scorer sees.
+
+## Subscription login
+
+`POST /oauth/claude/start`, `POST /oauth/codex/start`, and `POST /oauth/github/start` (console session required) return an authorization URL. The browser returns to `GET /oauth/{provider}/callback`, which stores the access token as that provider's key. Client ids are the public PKCE ids and can be overridden with `WOWROUTER_OAUTH_CLAUDE_CLIENT_ID`, `WOWROUTER_OAUTH_CODEX_CLIENT_ID`, and `WOWROUTER_OAUTH_GITHUB_CLIENT_ID`. The refresh token stays in the encrypted provider record. When it is within a minute of expiry, the next call refreshes it and stores the new access token.
 
 Priority `0` is first in fill-first order. A new account is added after the ones you already have. If the provider is on and it needs a key, the last remaining account cannot be removed until you turn the provider off.
 

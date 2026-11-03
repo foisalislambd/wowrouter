@@ -287,7 +287,7 @@ export const SETTINGS_DEFAULTS = {
       },
       roles: {},
       local: {
-        enabled: true,
+        enabled: false,
         password_policy: {
           min_length: 12,
           max_length: 128,

@@ -321,6 +321,7 @@ func regexHit(text string, class map[string]any) bool {
 }
 
 // Breakers tracks circuit state, key cooldowns, and quota hints in memory.
+// OnCool, when set, is called after a cooldown is recorded so it can be stored.
 type Breakers struct {
 	mu        sync.Mutex
 	state     map[string]*breaker
@@ -330,6 +331,7 @@ type Breakers struct {
 	lastGood  map[string]string
 	quota     map[string]float64
 	quotaSeen map[string]bool
+	OnCool    func(provider, keyID string, until time.Time)
 }
 
 type breaker struct {

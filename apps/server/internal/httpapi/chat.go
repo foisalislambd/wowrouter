@@ -57,36 +57,19 @@ func (s *Server) gatewayChat(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusBadRequest, err.Error(), "invalid_request_error", "invalid_body")
 		return
 	}
+	if key := strings.TrimSpace(r.Header.Get("Idempotency-Key")); key != "" {
+		if status, body, ok := s.remembered(key); ok {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_, _ = w.Write(body)
+			return
+		}
+		cap := &capture{ResponseWriter: w, status: http.StatusOK}
+		s.dispatch(cap, keyID, raw, "openai", "")
+		s.remember(key, cap.status, cap.buf.Bytes())
+		return
+	}
 	s.dispatch(w, keyID, raw, "openai", "")
-}
-
-func (s *Server) dispatch(w http.ResponseWriter, keyID string, raw []byte, dialect, model string) {
-	if s.Admin == nil {
-		writeOpenAIError(w, http.StatusNotFound, "The model is not configured.", "invalid_request_error", "model_not_found")
-		return
-	}
-	var body map[string]any
-	if json.Unmarshal(raw, &body) != nil || body == nil {
-		writeOpenAIError(w, http.StatusBadRequest, "The request body must be JSON.", "invalid_request_error", "invalid_body")
-		return
-	}
-	if model == "" {
-		model = str(body["model"])
-	}
-	if strings.TrimSpace(model) == "" {
-		writeOpenAIError(w, http.StatusBadRequest, "The model field is required.", "invalid_request_error", "model_required")
-		return
-	}
-	body["model"] = model
-	call := s.callFromKey(keyID, model, body, dialect)
-	out := s.Admin.Engine.Handle(call)
-	if dialect != "openai" && out.Stream == nil && out.Status < 400 && !out.SSE {
-		out.Body = gateway.FromOpenAI(dialect, model, out.Body)
-	}
-	if body["stream"] == true && dialect == "openai" && out.Stream == nil && out.Status < 400 {
-		out.SSE = true
-	}
-	s.writeOutcome(w, call, out)
 }
 
 func (s *Server) gatewayImages(w http.ResponseWriter, r *http.Request) {

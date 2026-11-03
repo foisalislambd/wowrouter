@@ -44,6 +44,13 @@ func (b *Breakers) CoolKey(provider, keyID string, retryAfter time.Duration) {
 	if b == nil || keyID == "" {
 		return
 	}
+	until := b.coolLocked(provider, keyID, retryAfter)
+	if b.OnCool != nil && !until.IsZero() {
+		b.OnCool(provider, keyID, until)
+	}
+}
+
+func (b *Breakers) coolLocked(provider, keyID string, retryAfter time.Duration) time.Time {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.initLocked()
@@ -66,6 +73,29 @@ func (b *Breakers) CoolKey(provider, keyID string, retryAfter time.Duration) {
 	}
 	k.last = d
 	k.until = time.Now().Add(d)
+	return k.until
+}
+
+// Restore puts a cooldown back after a restart. A later in-memory cooldown wins.
+func (b *Breakers) Restore(provider, keyID string, until time.Time) {
+	if b == nil || keyID == "" || !time.Now().Before(until) {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.initLocked()
+	k := b.keys[keyName(provider, keyID)]
+	if k == nil {
+		k = &keyState{}
+		b.keys[keyName(provider, keyID)] = k
+	}
+	if until.After(k.until) {
+		k.until = until
+		k.last = time.Until(until)
+	}
+	if k.strikes == 0 {
+		k.strikes = 1
+	}
 }
 
 // KeyCooling reports whether the credential should be skipped.
@@ -259,7 +289,13 @@ func retryAfterHeader(h http.Header) time.Duration {
 }
 
 func headerQuota(h http.Header) (float64, bool) {
-	for _, name := range []string{"X-RateLimit-Remaining", "X-Ratelimit-Remaining-Requests"} {
+	for _, name := range []string{
+		"X-RateLimit-Remaining",
+		"X-Ratelimit-Remaining-Requests",
+		"Anthropic-Ratelimit-Requests-Remaining",
+		"Anthropic-Ratelimit-Tokens-Remaining",
+		"X-Ratelimit-Remaining-Tokens",
+	} {
 		v := h.Get(name)
 		if v == "" {
 			continue

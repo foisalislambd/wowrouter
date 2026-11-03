@@ -184,6 +184,12 @@ Deleting the folder removes keys, logs, and settings. Keep a copy of `secret.key
 
 The server rejects a listen address that is not a loopback address (`127.0.0.1`, `localhost`, or `::1`).
 
+Sign-in is the bootstrap token printed on first start. Password sign-in is off until you turn it on under **Settings → Sign-in & SSO**, set a password of at least 12 characters, and save. The password is stored as a bcrypt hash. The bootstrap token still works. Provider secrets in the database are encrypted with the key in `secret.key`.
+
+An optional loopback TLS proxy can be started from `POST /admin/v1/runtime/mitm` with `{"enabled":true}`. It listens on `127.0.0.1:8790`, does not install a CA for you, and stays off until that call. Trust `ca_pem` from `GET /admin/v1/runtime/mitm` yourself if a client must accept the proxy certificate.
+
+Model aliases on a model (`aliases` map or list) are accepted as the public model id. `POST /v1/responses` is the Codex wire format. Alert channels with a URL receive a signed POST when an alert is stored.
+
 ## Develop
 
 Go 1.26 or newer and Node.js 20 or newer.

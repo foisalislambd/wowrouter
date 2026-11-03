@@ -126,6 +126,7 @@ var secretFields = map[string]struct{}{
 	"signing_secret": {}, "hmac_secret": {}, "access_key": {}, "secret_access_key": {},
 	"token": {}, "bootstrap_token": {}, "bearer_token": {},
 	"service_account_json": {}, "private_key": {}, "access_token": {},
+	"password_hash": {}, "refresh_token": {}, "id_token": {}, "oauth_token": {},
 }
 
 func redactTree(v any) any {
