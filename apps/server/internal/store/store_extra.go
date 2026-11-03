@@ -12,10 +12,10 @@ import (
 func (s *Store) GetLog(id int64) (RequestLog, error) {
 	var item RequestLog
 	err := s.db.QueryRow(`
-SELECT id, created_at, source, model_id, status_code, latency_ms, prompt_tokens, completion_tokens, error_message, request_json
+SELECT id, created_at, source, model_id, status_code, latency_ms, prompt_tokens, completion_tokens, error_message, request_json, route_note
 FROM request_logs WHERE id = ?`, id).Scan(
 		&item.ID, &item.CreatedAt, &item.Source, &item.ModelID, &item.StatusCode, &item.LatencyMS,
-		&item.PromptTokens, &item.CompletionTokens, &item.ErrorMessage, &item.RequestJSON,
+		&item.PromptTokens, &item.CompletionTokens, &item.ErrorMessage, &item.RequestJSON, &item.RouteNote,
 	)
 	if err == sql.ErrNoRows {
 		return RequestLog{}, ErrNotFound
@@ -69,7 +69,7 @@ ORDER BY COUNT(*) DESC, l.model_id`)
 }
 
 func (s *Store) ListFallbacks() ([]Fallback, error) {
-	rows, err := s.db.Query(`SELECT id, name, created_at FROM fallbacks ORDER BY name`)
+	rows, err := s.db.Query(`SELECT id, name, strategy, created_at FROM fallbacks ORDER BY name`)
 	if err != nil {
 		return nil, err
 	}
@@ -77,8 +77,11 @@ func (s *Store) ListFallbacks() ([]Fallback, error) {
 	var out []Fallback
 	for rows.Next() {
 		var item Fallback
-		if err := rows.Scan(&item.ID, &item.Name, &item.CreatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.Strategy, &item.CreatedAt); err != nil {
 			return nil, err
+		}
+		if item.Strategy == "" {
+			item.Strategy = "priority"
 		}
 		item.ModelID = "fallback/" + item.ID
 		out = append(out, item)
@@ -87,16 +90,25 @@ func (s *Store) ListFallbacks() ([]Fallback, error) {
 		out = []Fallback{}
 	}
 	for i := range out {
-		models, err := s.fallbackModels(out[i].ID)
+		models, weights, err := s.fallbackSteps(out[i].ID)
 		if err != nil {
 			return nil, err
 		}
 		out[i].Models = models
+		out[i].Weights = weights
 	}
 	return out, rows.Err()
 }
 
 func (s *Store) SaveFallback(name string, models []string) (Fallback, error) {
+	return s.SaveFallbackPlan(name, models, "priority", nil)
+}
+
+func (s *Store) SaveFallbackPlan(name string, models []string, strategy string, weights []int) (Fallback, error) {
+	strategy, err := normalizeCombo(strategy)
+	if err != nil {
+		return Fallback{}, err
+	}
 	id, err := fallbackID(name)
 	if err != nil {
 		return Fallback{}, err
@@ -106,7 +118,8 @@ func (s *Store) SaveFallback(name string, models []string) (Fallback, error) {
 	}
 	seen := map[string]bool{}
 	clean := make([]string, 0, len(models))
-	for _, modelID := range models {
+	cleanWeights := make([]int, 0, len(models))
+	for i, modelID := range models {
 		modelID = strings.TrimSpace(modelID)
 		if modelID == "" || seen[modelID] || strings.HasPrefix(modelID, "fallback/") {
 			continue
@@ -118,8 +131,16 @@ func (s *Store) SaveFallback(name string, models []string) (Fallback, error) {
 		if err := fallbackStepAllowed(route); err != nil {
 			return Fallback{}, err
 		}
+		weight := 1
+		if i < len(weights) {
+			weight = weights[i]
+		}
+		if weight < 1 || weight > 100 {
+			return Fallback{}, errString("weights must be from 1 to 100")
+		}
 		seen[modelID] = true
 		clean = append(clean, modelID)
+		cleanWeights = append(cleanWeights, weight)
 	}
 	if len(clean) < 2 {
 		return Fallback{}, errFallbackModels
@@ -130,15 +151,15 @@ func (s *Store) SaveFallback(name string, models []string) (Fallback, error) {
 	}
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339)
-	if _, err := tx.Exec(`INSERT INTO fallbacks (id, name, created_at) VALUES (?, ?, ?)
-ON CONFLICT(id) DO UPDATE SET name = excluded.name`, id, strings.TrimSpace(name), now); err != nil {
+	if _, err := tx.Exec(`INSERT INTO fallbacks (id, name, strategy, created_at) VALUES (?, ?, ?, ?)
+ON CONFLICT(id) DO UPDATE SET name = excluded.name, strategy = excluded.strategy`, id, strings.TrimSpace(name), strategy, now); err != nil {
 		return Fallback{}, err
 	}
 	if _, err := tx.Exec(`DELETE FROM fallback_steps WHERE fallback_id = ?`, id); err != nil {
 		return Fallback{}, err
 	}
 	for i, modelID := range clean {
-		if _, err := tx.Exec(`INSERT INTO fallback_steps (fallback_id, position, model_id) VALUES (?, ?, ?)`, id, i, modelID); err != nil {
+		if _, err := tx.Exec(`INSERT INTO fallback_steps (fallback_id, position, model_id, weight) VALUES (?, ?, ?, ?)`, id, i, modelID, cleanWeights[i]); err != nil {
 			return Fallback{}, err
 		}
 	}
@@ -149,7 +170,7 @@ ON CONFLICT(id) DO UPDATE SET name = excluded.name`, id, strings.TrimSpace(name)
 	if err := tx.Commit(); err != nil {
 		return Fallback{}, err
 	}
-	return Fallback{ID: id, Name: strings.TrimSpace(name), ModelID: "fallback/" + id, Models: clean, CreatedAt: created}, nil
+	return Fallback{ID: id, Name: strings.TrimSpace(name), ModelID: "fallback/" + id, Strategy: strategy, Models: clean, Weights: cleanWeights, CreatedAt: created}, nil
 }
 
 func (s *Store) DeleteFallback(id string) error {
@@ -206,30 +227,42 @@ func (s *Store) ResolveChain(modelRef string) ([]Route, error) {
 }
 
 func (s *Store) fallbackModels(id string) ([]string, error) {
+	models, _, err := s.fallbackSteps(id)
+	return models, err
+}
+
+func (s *Store) fallbackSteps(id string) ([]string, []int, error) {
 	var exists int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM fallbacks WHERE id = ?`, id).Scan(&exists); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if exists == 0 {
-		return nil, ErrNotFound
+		return nil, nil, ErrNotFound
 	}
-	rows, err := s.db.Query(`SELECT model_id FROM fallback_steps WHERE fallback_id = ? ORDER BY position`, id)
+	rows, err := s.db.Query(`SELECT model_id, weight FROM fallback_steps WHERE fallback_id = ? ORDER BY position`, id)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var out []string
+	var weights []int
 	for rows.Next() {
 		var modelID string
-		if err := rows.Scan(&modelID); err != nil {
-			return nil, err
+		var weight int
+		if err := rows.Scan(&modelID, &weight); err != nil {
+			return nil, nil, err
+		}
+		if weight < 1 {
+			weight = 1
 		}
 		out = append(out, modelID)
+		weights = append(weights, weight)
 	}
 	if out == nil {
 		out = []string{}
+		weights = []int{}
 	}
-	return out, rows.Err()
+	return out, weights, rows.Err()
 }
 
 var errFallbackModels = errString("add at least two different models")
@@ -241,8 +274,10 @@ type errString string
 func (e errString) Error() string { return string(e) }
 
 func fallbackStepAllowed(route Route) error {
-	if route.Protocol != catalog.ProtocolOpenAIChat {
-		return errString(route.Model.ID + " is not an OpenAI-compatible chat model")
+	switch route.Protocol {
+	case catalog.ProtocolOpenAIChat, catalog.ProtocolAnthropic, catalog.ProtocolGemini, catalog.ProtocolOllama, catalog.ProtocolCohere:
+	default:
+		return errString(route.Model.ID + " is not a chat model this router can call")
 	}
 	if route.Model.Kind != "" && route.Model.Kind != catalog.KindChat {
 		return errString(route.Model.ID + " is not a chat model")

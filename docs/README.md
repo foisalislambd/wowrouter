@@ -10,7 +10,7 @@ WowRouter runs on your computer and gives Cursor, scripts, and other tools one l
 | [Use with Cursor](use-with-cursor.md) | Point Cursor, or any OpenAI client, at WowRouter |
 | [Command line](command-line.md) | Start, stop, and check the npm command |
 | [Desktop app](desktop.md) | Use the window, the tray, and start-with-Windows |
-| [Providers and models](providers-and-models.md) | Pick a provider, a model id, and a fallback |
+| [Providers and models](providers-and-models.md) | Pick a provider, a model id, auto, or a combo |
 | [API](api.md) | Call chat, images, video, and the model list |
 | [Decisions](decisions.md) | Ask a yes/no, choice, or score question |
 | [Your data](your-data.md) | See where keys and logs live, and how to move them |

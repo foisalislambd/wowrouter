@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"airoute/server/internal/catalog"
@@ -19,12 +20,14 @@ import (
 )
 
 type Server struct {
-	Store   *Store
-	OpenAI  *openai.Client
-	WebDir  string
-	Addr    string
-	DataDir string
-	Stop    func()
+	Store         *Store
+	OpenAI        *openai.Client
+	WebDir        string
+	Addr          string
+	DataDir       string
+	Stop          func()
+	loginMu       sync.Mutex
+	loginAttempts map[string][]time.Time
 }
 
 // Store is the persistence surface the HTTP layer needs.
@@ -32,11 +35,12 @@ type Store = store.Store
 
 func New(db *store.Store, webDir, addr, dataDir string) *Server {
 	return &Server{
-		Store:   db,
-		OpenAI:  openai.NewClient(),
-		WebDir:  webDir,
-		Addr:    addr,
-		DataDir: dataDir,
+		Store:         db,
+		OpenAI:        openai.NewClient(),
+		WebDir:        webDir,
+		Addr:          addr,
+		DataDir:       dataDir,
+		loginAttempts: map[string][]time.Time{},
 	}
 }
 
@@ -64,7 +68,12 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/activity/{id}", s.activityItem)
 	mux.HandleFunc("DELETE /api/activity", s.clearActivity)
 	mux.HandleFunc("GET /api/usage", s.usage)
+	mux.HandleFunc("GET /api/session", s.getSession)
+	mux.HandleFunc("POST /api/session", s.login)
+	mux.HandleFunc("DELETE /api/session", s.logout)
 	mux.HandleFunc("GET /api/settings", s.settings)
+	mux.HandleFunc("PUT /api/settings/auth", s.savePanelAuth)
+	mux.HandleFunc("GET /api/clients", s.clients)
 	mux.HandleFunc("GET /api/desktop", s.getDesktop)
 	mux.HandleFunc("PUT /api/desktop", s.saveDesktop)
 	mux.HandleFunc("GET /api/fallbacks", s.listFallbacks)
@@ -74,12 +83,18 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/playground/media", s.playgroundMedia)
 	mux.HandleFunc("POST /api/playground/decision", s.playgroundDecision)
 	mux.HandleFunc("GET /v1/models", s.gatewayModels)
+	mux.HandleFunc("POST /v1/models/query", s.queryModels)
 	mux.HandleFunc("POST /v1/chat/completions", s.gatewayChat)
 	mux.HandleFunc("POST /v1/systemone", s.gatewayDecision)
 	mux.HandleFunc("POST /v1/images/generations", s.gatewayImages)
 	mux.HandleFunc("POST /v1/videos/generations", s.gatewayVideos)
 	mux.HandleFunc("/", s.spa)
-	return mux
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.allowPanel(w, r) {
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
 }
 
 func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
@@ -320,15 +335,16 @@ func (s *Server) listKeys(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) createKey(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name string `json:"name"`
+		Name             string   `json:"name"`
+		MonthlyBudgetUSD *float64 `json:"monthlyBudgetUsd"`
 	}
 	if err := readJSON(r, &body); err != nil && !errors.Is(err, io.EOF) {
 		writeAPIError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	created, err := s.Store.CreateRouterKey(body.Name)
+	created, err := s.Store.CreateRouterKeyBudget(body.Name, body.MonthlyBudgetUSD)
 	if err != nil {
-		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusCreated, created)
@@ -363,8 +379,31 @@ func (s *Server) gatewayModels(w http.ResponseWriter, r *http.Request) {
 		writeOpenAIError(w, http.StatusInternalServerError, err.Error(), "server_error", "internal_error")
 		return
 	}
-	data := make([]map[string]any, 0, len(items))
+	query := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("q")))
+	kind := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("kind")))
+	minContext, _ := strconv.Atoi(r.URL.Query().Get("min_context"))
+	var reasoning *bool
+	if raw := strings.TrimSpace(r.URL.Query().Get("reasoning")); raw != "" {
+		value := raw == "1" || strings.EqualFold(raw, "true")
+		reasoning = &value
+	}
+	data := make([]map[string]any, 0, len(items)+8)
+	for _, id := range []string{"auto", "auto/cheap", "auto/fast", "auto/coding"} {
+		if modelVisible(id, "wowrouter", "chat", false, 0, query, kind, minContext, reasoning) {
+			data = append(data, map[string]any{"id": id, "object": "model", "created": 0, "owned_by": "wowrouter"})
+		}
+	}
+	if chains, err := s.Store.ListFallbacks(); err == nil {
+		for _, chain := range chains {
+			if modelVisible(chain.ModelID, "fallback", "chat", false, 0, query, kind, minContext, reasoning) {
+				data = append(data, map[string]any{"id": chain.ModelID, "object": "model", "created": 0, "owned_by": "fallback"})
+			}
+		}
+	}
 	for _, item := range items {
+		if !modelVisible(item.ID, item.ProviderSlug, item.Kind, item.Reasoning, item.ContextWindow, query, kind, minContext, reasoning) {
+			continue
+		}
 		data = append(data, map[string]any{
 			"id":       item.ID,
 			"object":   "model",
@@ -372,17 +411,23 @@ func (s *Server) gatewayModels(w http.ResponseWriter, r *http.Request) {
 			"owned_by": item.ProviderSlug,
 		})
 	}
-	if chains, err := s.Store.ListFallbacks(); err == nil {
-		for _, chain := range chains {
-			data = append(data, map[string]any{
-				"id":       chain.ModelID,
-				"object":   "model",
-				"created":  0,
-				"owned_by": "fallback",
-			})
-		}
-	}
 	writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": data})
+}
+
+func modelVisible(id, owner, kind string, reasoning bool, context int, query, wantKind string, minContext int, wantReasoning *bool) bool {
+	if query != "" && !strings.Contains(strings.ToLower(id+" "+owner), query) {
+		return false
+	}
+	if wantKind != "" && kind != wantKind && !(wantKind == "chat" && kind == "") {
+		return false
+	}
+	if minContext > 0 && context < minContext {
+		return false
+	}
+	if wantReasoning != nil && reasoning != *wantReasoning {
+		return false
+	}
+	return true
 }
 
 func (s *Server) gatewayChat(w http.ResponseWriter, r *http.Request) {
@@ -430,13 +475,13 @@ func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request, source, keyID
 		return
 	}
 
-	routes, err := s.Store.ResolveChain(meta.Model)
+	plan, err := s.Store.ResolvePlan(meta.Model)
 	if errors.Is(err, store.ErrNotFound) {
 		message := "The model `" + meta.Model + "` does not exist."
 		s.failChat(w, source, keyID, meta.Model, http.StatusNotFound, "invalid_request_error", "model_not_found", message, started)
 		return
 	}
-	if errors.Is(err, store.ErrFallbackEmpty) {
+	if errors.Is(err, store.ErrFallbackEmpty) || errors.Is(err, store.ErrNoAutoCandidates) {
 		s.failChat(w, source, keyID, meta.Model, http.StatusBadRequest, "invalid_request_error", "model_not_found", err.Error(), started)
 		return
 	}
@@ -444,7 +489,15 @@ func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request, source, keyID
 		s.failChat(w, source, keyID, meta.Model, http.StatusInternalServerError, "server_error", "internal_error", err.Error(), started)
 		return
 	}
-	routes, err = s.expandRoutes(routes)
+	if err := s.Store.RejectIfOverBudget(keyID); errors.Is(err, store.ErrBudget) {
+		s.failChat(w, source, keyID, meta.Model, http.StatusTooManyRequests, "insufficient_quota", "budget_exceeded", err.Error(), started)
+		return
+	} else if err != nil {
+		s.failChat(w, source, keyID, meta.Model, http.StatusInternalServerError, "server_error", "internal_error", err.Error(), started)
+		return
+	}
+	r = r.WithContext(withDecision(r.Context(), routeDecision{Asked: plan.Asked, Strategy: plan.Strategy}))
+	routes, err := s.expandRoutes(plan.Routes)
 	if err != nil {
 		s.failChat(w, source, keyID, meta.Model, http.StatusInternalServerError, "server_error", "internal_error", err.Error(), started)
 		return
@@ -485,6 +538,7 @@ func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request, source, keyID
 }
 
 func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, keyID string, route store.Route, body []byte, started time.Time, retry bool) bool {
+	stampDecision(w, r, route, 0, 0)
 	upstreamBody, stream, err := openai.RewriteChatModel(body, route.Model.UpstreamID)
 	if err != nil {
 		s.failChat(w, source, keyID, route.Model.ID, http.StatusBadRequest, "invalid_request_error", "invalid_body", err.Error(), started)
@@ -497,7 +551,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 		upstreamBody, path, err = openai.PrepareOpencode(upstreamBody, route.Model.UpstreamID)
 		if err != nil {
 			if retry {
-				_ = s.Store.AddLog(store.LogInput{
+				_ = s.addRouteLog(r, store.LogInput{
 					Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 					StatusCode: http.StatusBadRequest, LatencyMS: int(time.Since(started).Milliseconds()), ErrorMessage: err.Error(),
 				})
@@ -525,7 +579,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 	request := providerRequest(http.MethodPost, endpoint, header, upstreamBody)
 	resp, err := s.OpenAI.Send(r.Context(), http.MethodPost, endpoint, upstreamBody, header)
 	if err != nil {
-		_ = s.Store.AddLog(store.LogInput{
+		_ = s.addRouteLog(r, store.LogInput{
 			Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 			StatusCode: http.StatusBadGateway, LatencyMS: int(time.Since(started).Milliseconds()), ErrorMessage: err.Error(), Request: string(request),
 		})
@@ -543,7 +597,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 	if resp.StatusCode >= 400 && retry {
 		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		message := upstreamErrorMessage(payload)
-		_ = s.Store.AddLog(store.LogInput{
+		_ = s.addRouteLog(r, store.LogInput{
 			Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 			StatusCode: resp.StatusCode, LatencyMS: int(time.Since(started).Milliseconds()), ErrorMessage: message, Request: string(request),
 		})
@@ -554,7 +608,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 		payload, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 		if err != nil {
 			if retry {
-				_ = s.Store.AddLog(store.LogInput{
+				_ = s.addRouteLog(r, store.LogInput{
 					Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 					StatusCode: http.StatusBadGateway, LatencyMS: int(time.Since(started).Milliseconds()), ErrorMessage: err.Error(), Request: string(request),
 				})
@@ -565,7 +619,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 		}
 		text := openai.ResponsesText(payload)
 		s.noteAccount(route)
-		_ = s.Store.AddLog(store.LogInput{
+		_ = s.addRouteLog(r, store.LogInput{
 			Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 			StatusCode: resp.StatusCode, LatencyMS: int(time.Since(started).Milliseconds()), Request: string(request),
 		})
@@ -591,7 +645,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 			message = format.Err()
 		}
 		s.noteAccount(route)
-		_ = s.Store.AddLog(store.LogInput{
+		_ = s.addRouteLog(r, store.LogInput{
 			Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 			StatusCode: resp.StatusCode, LatencyMS: int(time.Since(started).Milliseconds()),
 			PromptTokens: prompt, CompletionTokens: completion, ErrorMessage: message, Request: string(request),
@@ -602,7 +656,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 	if err != nil {
 		if retry {
-			_ = s.Store.AddLog(store.LogInput{
+			_ = s.addRouteLog(r, store.LogInput{
 				Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 				StatusCode: http.StatusBadGateway, LatencyMS: int(time.Since(started).Milliseconds()), ErrorMessage: err.Error(), Request: string(request),
 			})
@@ -618,8 +672,9 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 	}
 	if resp.StatusCode < 400 {
 		s.noteAccount(route)
+		stampDecision(w, r, route, prompt, completion)
 	}
-	_ = s.Store.AddLog(store.LogInput{
+	_ = s.addRouteLog(r, store.LogInput{
 		Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 		StatusCode: resp.StatusCode, LatencyMS: int(time.Since(started).Milliseconds()),
 		PromptTokens: prompt, CompletionTokens: completion, ErrorMessage: message, Request: string(request),

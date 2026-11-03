@@ -39,6 +39,7 @@ export default function ActivityDetailPage() {
             <div>
               <p className="text-xs tracking-wide text-gray-500 uppercase">Model</p>
               <p className="mt-1 font-mono text-xs">{item.modelId || "—"}</p>
+              {item.routeNote && <p className="mt-1 text-xs text-gray-500">{item.routeNote}</p>}
             </div>
             <div>
               <p className="text-xs tracking-wide text-gray-500 uppercase">Status</p>

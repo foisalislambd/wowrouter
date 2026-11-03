@@ -4,6 +4,11 @@ Versions follow the `version` field in the root `package.json`. Releases are pub
 
 ## Unreleased
 
+- Routing presets `auto`, `auto/cheap`, `auto/fast`, and `auto/coding` pick among chat models that are already turned on. Named combos can use priority, round robin, weighted, cheapest, or least-used order.
+- The panel has a Clients page with copy-paste setup for Cursor, OpenCode, Cline, and scripts. Usage shows the last 14 days. A router key can have an optional monthly USD cap.
+- Successful calls record the route and, on non-streaming responses, send `X-WowRouter-*` cost and model headers.
+- `GET /v1/models` accepts `q`, `kind`, `reasoning`, and `min_context`. `POST /v1/models/query` returns a short ranked list.
+- The panel password is off by default. Settings can turn it on. The hash is bcrypt, the browser gets an HttpOnly session cookie, and `/v1` still uses router keys.
 - The product name is WowRouter. npm, Docker Hub, and GitHub Packages still publish `airoute`, and they also publish `wowrouter`.
 - Existing data stays in the `airoute-router` folder, in `airoute.db`. Router keys still start with `sk-airoute-`.
 

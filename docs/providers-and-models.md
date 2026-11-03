@@ -66,10 +66,19 @@ Chat is the path Cursor uses. The other kinds are in the [API](api.md) and [Deci
 
 Some providers are listed but marked unsupported. Those rows are there so you can see them. They do not complete a chat call.
 
-## Fallback
+## Routing
 
-**Fallback** is a named chain of chat models. The public id looks like `fallback/your-name`. If the first model fails, WowRouter tries the next.
+`auto` is ready as soon as at least one chat model is turned on. Variants:
 
-Every step in a fallback has to be an OpenAI-style chat model. Image, video, and decision models cannot sit in the chain. The panel will say so if you add one.
+| Model id | What it prefers |
+| --- | --- |
+| `auto` | A balance of catalog price, recent latency, errors, and context |
+| `auto/coding` | Reasoning models and a longer context |
+| `auto/fast` | Models that have recently answered quickly |
+| `auto/cheap` | The lowest catalog price |
 
-Create the chain on the Fallback page, turn it on the same way you think about any other model, and pass `fallback/your-name` as the model id from the client.
+WowRouter tries up to four. If one fails, the next ranked model is called in the same request.
+
+A combo is a list you name on the Routing page. The public id looks like `fallback/your-name`. The order is one of priority, round robin, weighted, cheapest, or least used. If the chosen model fails, the next one in that order runs.
+
+Every step has to be a chat model the router can call. Image, video, and decision models cannot sit in the chain. The panel will say so if you add one.

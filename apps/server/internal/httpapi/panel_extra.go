@@ -50,8 +50,14 @@ func (s *Server) usage(w http.ResponseWriter, _ *http.Request) {
 		completion += row.CompletionTokens
 		cost += row.CostUSD
 	}
+	days, err := s.Store.UsageDays(14)
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"rows": rows,
+		"days": days,
 		"totals": map[string]any{
 			"requests": requests, "errors": errors,
 			"promptTokens": prompt, "completionTokens": completion, "costUsd": cost,
@@ -106,14 +112,16 @@ func (s *Server) listFallbacks(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) saveFallback(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Name   string   `json:"name"`
-		Models []string `json:"models"`
+		Name     string   `json:"name"`
+		Models   []string `json:"models"`
+		Strategy string   `json:"strategy"`
+		Weights  []int    `json:"weights"`
 	}
 	if err := readJSON(r, &body); err != nil {
 		writeAPIError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	item, err := s.Store.SaveFallback(body.Name, body.Models)
+	item, err := s.Store.SaveFallbackPlan(body.Name, body.Models, body.Strategy, body.Weights)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return

@@ -1,6 +1,6 @@
 # Panel
 
-The panel is the web page at `http://127.0.0.1:8787`. You use it to manage providers, models, and the key your tools send. The page does not ask you to log in. It is only available on this computer.
+The panel is the web page at `http://127.0.0.1:8787`. You use it to manage providers, models, and the key your tools send. It does not ask you to log in until you turn on a password in **Settings**.
 
 ## Pages
 
@@ -8,12 +8,13 @@ The panel is the web page at `http://127.0.0.1:8787`. You use it to manage provi
 | --- | --- |
 | Overview | See that the router is up, and how many keys and calls you have |
 | Providers | Save a provider key, set a base URL, and turn models on |
-| Fallback | Choose a backup chat model if the first one fails |
-| API keys | Create the key Cursor will use |
+| Routing | Use `auto`, or save a combo that tries the next model when one fails |
+| Clients | Copy the base URL and a sample config for Cursor, OpenCode, Cline, or a script |
+| API keys | Create the key Cursor will use. A monthly dollar cap is optional |
 | Playground | Try a prompt, an image, or a decision before you wire up a tool |
 | Activity | Read one call at a time, including the request that was sent |
 | Usage | See calls grouped by model |
-| Settings | See the data folder and the listen address. On Windows, start with Windows |
+| Settings | See the data folder and the listen address. Turn on a panel password if this router will be reachable from another machine. On Windows, start with Windows |
 
 ## A normal first visit
 
@@ -45,7 +46,21 @@ The answer appears in the page. **Activity** keeps a copy of the call.
 
 **Activity** is the log. The list shows recent calls. Open one row when you want the request and the response. Clearing activity deletes those rows. It does not delete provider keys.
 
-**Usage** groups the same log by model so you can see what you have been calling.
+**Usage** groups the same log by model and shows the last 14 days. Cost is an estimate from the catalog price stored for that model. A model with a zero price stays at $0.
+
+## Routing
+
+**Auto** needs no combo. Set the model to `auto`, `auto/cheap`, `auto/fast`, or `auto/coding`. WowRouter ranks chat models that are turned on and tries up to four of them.
+
+A **combo** is a named list. Its id is `fallback/the-name`. The order can be priority, round robin, weighted, cheapest, or least used. If the first try fails, the next model in that order runs.
+
+## Panel password
+
+The password is off when you install WowRouter. The panel and `GET /health` stay open, and `/v1` still requires a router key.
+
+Turn the password on from **Settings** when the process can be reached from outside this computer. The password is stored as a bcrypt hash. A signed-in browser gets an HttpOnly session cookie that lasts 14 days. Wrong passwords are throttled. Changing the password signs other browsers out. Turning it off deletes the hash and the sessions, and the panel is open again.
+
+The router key your tools send is not this password.
 
 ## If a call fails in the playground
 
