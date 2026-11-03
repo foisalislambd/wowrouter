@@ -4,18 +4,18 @@ The API is OpenAI-shaped and local. Every call below uses:
 
 ```text
 http://127.0.0.1:8787
-Authorization: Bearer sk-airoute-...
+Authorization: Bearer sk-wowrouter-...
 ```
 
 Create the bearer key in the panel under **API keys**. Provider keys stay in the panel. Do not send those to this API.
 
-`GET /health` is the exception. It needs no key. It answers `{"service":"wowrouter","status":"ok"}` when this process is WowRouter. An older process may still answer `"service":"airoute"`.
+`GET /health` is the exception. It needs no key. It answers `{"service":"wowrouter","status":"ok"}`.
 
 ## List models
 
 ```bash
 curl http://127.0.0.1:8787/v1/models \
-  -H "Authorization: Bearer sk-airoute-..."
+  -H "Authorization: Bearer sk-wowrouter-..."
 ```
 
 You only see models that are turned on. A missing model in this list means it is off, or the provider has no list yet. See [Providers and models](providers-and-models.md).
@@ -24,12 +24,41 @@ You only see models that are turned on. A missing model in this list means it is
 
 ```bash
 curl http://127.0.0.1:8787/v1/chat/completions \
-  -H "Authorization: Bearer sk-airoute-..." \
+  -H "Authorization: Bearer sk-wowrouter-..." \
   -H "Content-Type: application/json" \
   -d "{\"model\":\"openai/gpt-4o-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}"
 ```
 
-Streaming works the same way as OpenAI: set `"stream": true`. Tools and the usual chat fields are forwarded to providers that speak the OpenAI chat API.
+Streaming works the same way as OpenAI: set `"stream": true`. Tools, tool results, and `cache_control` on content blocks are translated for Anthropic and Gemini providers. OpenAI-compatible providers receive the body unchanged.
+
+## Responses
+
+Codex and other Responses clients use `POST /v1/responses`. The body uses `input` and `instructions`. The router turns that into a chat request and returns a Responses object, including streamed `response.output_text.delta` events. A chat call may send `Idempotency-Key`. The same key returns the stored response for five minutes, including after a restart, for bodies up to 1 MiB.
+
+`GET /health` is liveness. `GET /ready` checks the database. `GET /metrics` is Prometheus text.
+
+`POST /v1/search` calls a saved `brave`, `tavily`, or `searxng` provider. `POST /v1/batches` stores the batch in the database. `POST /v1/skills/{name}` runs a saved skill. `POST /v1/a2a` is the task server (`tasks/send`, `tasks/get`, `tasks/cancel`). `POST /v1/mcp` is the MCP server, including a `chat` tool.
+
+Embeddings, speech, and moderations aimed at Gemini are translated. Other providers receive the OpenAI body.
+
+A fusion combo asks the first deployment to judge the others. A pipeline passes each stage's raw response along with the text.
+
+```bash
+curl http://127.0.0.1:8787/v1/responses \
+  -H "Authorization: Bearer sk-wowrouter-..." \
+  -H "Content-Type: application/json" \
+  -d "{\"model\":\"openai/gpt-4o-mini\",\"input\":\"Hello\"}"
+```
+
+A repeated chat call can send `Idempotency-Key`. The same key within five minutes returns the first response.
+
+## Embeddings, audio, moderations, search, batches
+
+`POST /v1/embeddings`, `POST /v1/audio/speech`, `POST /v1/audio/transcriptions`, `POST /v1/audio/translations`, and `POST /v1/moderations` forward to the provider selected by `model`.
+
+`POST /v1/search` takes `query` and `model` and runs one chat turn.
+
+`POST /v1/batches` accepts `{ "requests": [ { "custom_id": "1", "model": "openai/gpt-4o-mini", "messages": [...] } ] }` and runs each line before answering. `GET /v1/batches/{id}` returns that result.
 
 The model id must include the provider slug. `gpt-4o-mini` alone is not enough. Use `openai/gpt-4o-mini`.
 
@@ -39,7 +68,7 @@ A fallback id such as `fallback/writing` is valid here when you created that cha
 
 ```bash
 curl http://127.0.0.1:8787/v1/images/generations \
-  -H "Authorization: Bearer sk-airoute-..." \
+  -H "Authorization: Bearer sk-wowrouter-..." \
   -H "Content-Type: application/json" \
   -d "{\"model\":\"provider/image-model\",\"prompt\":\"A small red boat\"}"
 ```
@@ -50,7 +79,7 @@ Use an image model that is turned on. A chat model on this path is rejected.
 
 ```bash
 curl http://127.0.0.1:8787/v1/videos/generations \
-  -H "Authorization: Bearer sk-airoute-..." \
+  -H "Authorization: Bearer sk-wowrouter-..." \
   -H "Content-Type: application/json" \
   -d "{\"model\":\"provider/video-model\",\"prompt\":\"A slow pan across a harbor\"}"
 ```
@@ -66,7 +95,7 @@ Decision models do not use chat completions. They use `POST /v1/systemone`. The 
 | What you see | What to do |
 | --- | --- |
 | Connection refused | Start WowRouter |
-| 401 unauthorized | Send a current `sk-airoute-` key |
+| 401 unauthorized | Send a current `sk-wowrouter-` key |
 | Model not found, or not active | Turn the model on, and check the public id |
 | Wrong endpoint, mentions `/v1/systemone` | This model is a decision model |
 | Provider authentication error | Replace the key on that provider's page |

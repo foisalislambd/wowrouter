@@ -16,10 +16,17 @@ apps/desktop/data
 # go
 /bin
 coverage.out
+bench/bin/
+bench/.cache/
 
 # npm package build output
 packages/cli/vendor/
 packages/cli/panel/
+
+# gateway console export
+apps/console/.next/
+apps/console/out/
+bootstrap-token
 
 # python
 __pycache__/

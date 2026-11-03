@@ -1,7 +1,7 @@
 {
   "name": "wowrouter",
   "private": true,
-  "version": "1.1.8",
+  "version": "1.5.0",
   "description": "Local-first OpenAI-compatible AI router",
   "license": "MIT",
   "homepage": "https://github.com/foisalislambd/wowrouter#readme",
@@ -21,7 +21,8 @@
     "build:panel": "npm run build -w @wowrouter/panel",
     "dev:server": "go run ./apps/server/cmd/wowrouter",
     "dev:desktop": "go run ./apps/desktop/cmd/wowrouter-desktop",
-    "build:npm": "node scripts/build_npm.mjs"
+    "build:npm": "node scripts/build_npm.mjs",
+    "bench": "bash bench/run.sh"
   },
   "engines": {
     "node": ">=20"

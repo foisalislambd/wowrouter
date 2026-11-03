@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: wowrouter
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: 8787
+          env:
+            - name: WOWROUTER_ADDR
+              value: 0.0.0.0:8787
+            - name: WOWROUTER_DATA
+              value: {{ .Values.dataDir | quote }}
+            - name: WOWROUTER_PUBLIC_BIND
+              value: {{ .Values.publicBind | quote }}
+            - name: WOWROUTER_ADMIN_PASSWORD
+              value: {{ .Values.adminPassword | quote }}
+            - name: WOWROUTER_DATABASE_URL
+              value: {{ .Values.databaseUrl | quote }}
+            - name: WOWROUTER_LOG_FORMAT
+              value: json
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: 8787
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8787
+          volumeMounts:
+            - name: data
+              mountPath: {{ .Values.dataDir }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}
