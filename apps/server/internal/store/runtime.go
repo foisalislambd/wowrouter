@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"airoute/server/internal/assist"
 	"airoute/server/internal/quota"
 	"airoute/server/internal/routeplan"
 	"airoute/server/internal/secret"
@@ -87,8 +88,8 @@ func (s *Store) Features() (Features, error) {
 	if err != nil {
 		return out, err
 	}
-	if mode == "light" {
-		out.Compression = "light"
+	if assist.KnownMode(mode) && mode != "" && mode != "off" {
+		out.Compression = mode
 	}
 	cache, err := s.setting(settingCache)
 	if err != nil {
@@ -113,8 +114,11 @@ func (s *Store) Features() (Features, error) {
 // SaveFeatures stores the helper toggles. Compression is off or light.
 func (s *Store) SaveFeatures(in Features) (Features, error) {
 	mode := "off"
-	if in.Compression == "light" {
-		mode = "light"
+	if in.Compression != "" && in.Compression != "off" {
+		if !assist.KnownMode(in.Compression) {
+			return Features{}, errString("compression must be off, light, caveman, dedup, headroom, rtk, terse, or ultra")
+		}
+		mode = in.Compression
 	}
 	if err := s.setSetting(settingCompression, mode); err != nil {
 		return Features{}, err

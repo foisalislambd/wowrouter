@@ -421,6 +421,173 @@ export function deleteFallback(id: string) {
   return request<void>(`/api/fallbacks/${id}`, { method: "DELETE" })
 }
 
+export function catalogModels(params?: { q?: string; kind?: string; limit?: number; priced?: boolean }) {
+  const search = new URLSearchParams()
+  if (params?.q) search.set("q", params.q)
+  if (params?.kind) search.set("kind", params.kind)
+  if (params?.limit) search.set("limit", String(params.limit))
+  if (params?.priced) search.set("priced", "1")
+  const query = search.toString()
+  return request<{ models: CatalogModel[] }>(`/api/catalog/models${query ? `?${query}` : ""}`)
+}
+
+export type CatalogModel = {
+  id: string
+  provider: string
+  upstreamId: string
+  displayName: string
+  kind: string
+  inputUsdPerMillion: number
+  outputUsdPerMillion: number
+  active: boolean
+}
+
+export function freeProviders() {
+  return request<{ providers: { slug: string; name: string; category: string; summary: string }[] }>("/api/catalog/free")
+}
+
+export function quotaSlots() {
+  return request<{ slots: { slot: string; remaining: number; limit: number; resetUnix: number; cooldownUntil: number; updatedAt: string }[] }>("/api/quota")
+}
+
+export function cacheStats() {
+  return request<{ entries: number; oldest: string; enabled: boolean; ttl: number }>("/api/cache")
+}
+
+export function clearCache() {
+  return request<void>("/api/cache", { method: "DELETE" })
+}
+
+export function endpointList() {
+  return request<{ base: string; routes: { method: string; path: string; use: string }[] }>("/api/endpoints")
+}
+
+export function healthDetail() {
+  return request<{ status: string; uptimeSec: number; go: string; dataDir: string; addr: string; allocMb: number; logs: number; providers: number; activeModels: number; keys: number; providersStats: { provider: string; requests: number; errors: number }[] }>("/api/health/detail")
+}
+
+export function costReport() {
+  return request<{ totalUsd: number; byModel: { modelId: string; requests: number; costUsd: number }[]; prices: CatalogModel[] }>("/api/costs")
+}
+
+export function listWebhooks() {
+  return request<{ webhooks: { id: string; url: string; hint: string; enabled: boolean }[] }>("/api/webhooks")
+}
+
+export function addWebhook(url: string, secret: string) {
+  return request<{ id: string }>("/api/webhooks", { method: "POST", body: JSON.stringify({ url, secret }) })
+}
+
+export function deleteWebhook(id: string) {
+  return request<void>(`/api/webhooks/${id}`, { method: "DELETE" })
+}
+
+export function listSkills() {
+  return request<{ skills: { id: string; name: string; instruction: string }[] }>("/api/skills")
+}
+
+export function addSkill(name: string, instruction: string) {
+  return request<{ id: string }>("/api/skills", { method: "POST", body: JSON.stringify({ name, instruction }) })
+}
+
+export function deleteSkill(id: string) {
+  return request<void>(`/api/skills/${id}`, { method: "DELETE" })
+}
+
+export function listEvals() {
+  return request<{ evals: { id: string; name: string; modelId: string; prompt: string; expect: string; lastStatus: string }[] }>("/api/evals")
+}
+
+export function addEval(body: { name: string; modelId: string; prompt: string; expect: string }) {
+  return request<{ id: string }>("/api/evals", { method: "POST", body: JSON.stringify(body) })
+}
+
+export function runEval(id: string) {
+  return request<{ status: string; http: number; body: string }>(`/api/evals/${id}/run`, { method: "POST", body: "{}" })
+}
+
+export function deleteEval(id: string) {
+  return request<void>(`/api/evals/${id}`, { method: "DELETE" })
+}
+
+export function listTeams() {
+  return request<{ teams: { id: string; name: string; monthlyBudgetUsd: number | null; keyIds: string[] }[] }>("/api/teams")
+}
+
+export function addTeam(name: string, monthlyBudgetUsd: number | null, keyIds: string[]) {
+  return request<{ id: string }>("/api/teams", { method: "POST", body: JSON.stringify({ name, monthlyBudgetUsd, keyIds }) })
+}
+
+export function deleteTeam(id: string) {
+  return request<void>(`/api/teams/${id}`, { method: "DELETE" })
+}
+
+export function listBookmarks() {
+  return request<{ bookmarks: { id: string; name: string; url: string }[] }>("/api/bookmarks")
+}
+
+export function addBookmark(name: string, url: string) {
+  return request<{ id: string }>("/api/bookmarks", { method: "POST", body: JSON.stringify({ name, url }) })
+}
+
+export function deleteBookmark(id: string) {
+  return request<void>(`/api/bookmarks/${id}`, { method: "DELETE" })
+}
+
+export function listAgentNotes() {
+  return request<{ agents: { id: string; name: string; kind: string; detail: string }[]; recent: { id: number; modelId: string; source: string; statusCode: number }[] }>("/api/agents")
+}
+
+export function addAgentNote(name: string, kind: string, detail: string) {
+  return request<{ id: string }>("/api/agents", { method: "POST", body: JSON.stringify({ name, kind, detail }) })
+}
+
+export function deleteAgentNote(id: string) {
+  return request<void>(`/api/agents/${id}`, { method: "DELETE" })
+}
+
+export type Guards = { chaos: boolean; chaosFailPercent: number; chaosDelayMs: number; rpm: number; upstreamProxy: string }
+
+export function getGuards() {
+  return request<Guards>("/api/guards")
+}
+
+export function saveGuards(body: Guards) {
+  return request<Guards>("/api/guards", { method: "PUT", body: JSON.stringify(body) })
+}
+
+export function previewCompression(mode: string, text: string) {
+  return request<{ text: string; before: number; after: number }>("/api/compression/preview", { method: "POST", body: JSON.stringify({ mode, text }) })
+}
+
+export function translateBody(direction: string, body: unknown) {
+  return request<{ body: unknown }>("/api/translate", { method: "POST", body: JSON.stringify({ direction, body }) })
+}
+
+export function auditLogs(source: string) {
+  return request<{ logs: { id: number; createdAt: string; source: string; modelId: string; statusCode: number; errorMessage: string }[] }>(`/api/audit?source=${encodeURIComponent(source)}`)
+}
+
+export function changelogText() {
+  return request<{ markdown: string }>("/api/changelog")
+}
+
+export function onboardingSteps() {
+  return request<{ steps: { id: string; label: string; done: boolean }[] }>("/api/onboarding")
+}
+
+export function localFiles() {
+  return request<{ files: { id: string; filename: string; bytes: number; purpose: string }[] }>("/api/files/local")
+}
+
+export function localBatches() {
+  return request<{ batches: { id: string; status: string; endpoint: string; created_at: string }[] }>("/api/batches/local")
+}
+
+export function consoleLines() {
+  return request<{ lines: string[] }>("/api/console")
+}
+
 export function formatTokens(value: number) {
   if (!value) return "—"
   if (value >= 1_000_000) {

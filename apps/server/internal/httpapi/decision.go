@@ -39,7 +39,11 @@ func (s *Server) addRouteLog(r *http.Request, input store.LogInput) error {
 	if r != nil && input.RouteNote == "" {
 		input.RouteNote = noteRoute(r, input.ModelID)
 	}
-	return s.Store.AddLog(input)
+	err := s.Store.AddLog(input)
+	if err == nil {
+		go s.deliverWebhooks(input)
+	}
+	return err
 }
 
 func stampDecision(w http.ResponseWriter, r *http.Request, route store.Route, prompt, completion int) {

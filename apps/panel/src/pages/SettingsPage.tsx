@@ -1,4 +1,5 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
+import { hiddenNavHrefs, panelNavItems, saveHiddenNav } from "@/config/panel.config";
 import { clearActivity, getDesktop, getSession, getSettings, saveDesktop, saveFeatures, saveOIDC, savePanelAuth, type Features } from "@/lib/api";
 import { useEffect, useState } from "react";
 
@@ -218,11 +219,20 @@ export default function SettingsPage() {
         </div>
         <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
           <p className="text-xs tracking-wide text-gray-500 uppercase">Prompt helpers</p>
-          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">All off by default. Compression only squeezes extra spaces in text messages. Cache stores non-streaming replies on this computer. Memory sends notes from the Memory page.</p>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">All off by default. Compression rewrites text locally. Cache stores non-streaming replies on this computer. Memory sends notes from the Memory page.</p>
           <div className="mt-3 space-y-2 text-sm text-gray-800 dark:text-gray-100">
             <label className="flex items-center gap-2">
-              <input type="checkbox" checked={features.compression === "light"} onChange={(event) => setFeatures({ ...features, compression: event.target.checked ? "light" : "off" })} />
-              Light prompt compression
+              Compression
+              <select value={features.compression || "off"} onChange={(event) => setFeatures({ ...features, compression: event.target.value })} className="h-9 rounded-lg border border-gray-200 bg-white px-2 dark:border-gray-700 dark:bg-white/5">
+                <option value="off">Off</option>
+                <option value="light">Light — squeeze spaces</option>
+                <option value="caveman">Caveman — drop filler words</option>
+                <option value="dedup">Dedup — drop repeated lines</option>
+                <option value="headroom">Headroom — keep the first 4000 characters</option>
+                <option value="rtk">RTK — drop shell prompt lines</option>
+                <option value="terse">Terse</option>
+                <option value="ultra">Ultra</option>
+              </select>
             </label>
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={features.cache} onChange={(event) => setFeatures({ ...features, cache: event.target.checked })} />
@@ -242,6 +252,7 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+        <SidebarChoices />
         <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
           <p className="text-xs tracking-wide text-gray-500 uppercase">Background</p>
           <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">The router keeps running after you close the window. Quit it from the tray icon.</p>
@@ -263,6 +274,32 @@ export default function SettingsPage() {
             Clear request logs
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SidebarChoices() {
+  const [hidden, setHidden] = useState<string[]>([]);
+  useEffect(() => {
+    setHidden([...hiddenNavHrefs()]);
+  }, []);
+  function toggle(href: string) {
+    const next = hidden.includes(href) ? hidden.filter((item) => item !== href) : [...hidden, href];
+    setHidden(next);
+    saveHiddenNav(next);
+  }
+  return (
+    <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
+      <p className="text-xs tracking-wide text-gray-500 uppercase">Sidebar</p>
+      <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">Hide pages you do not use. Settings stays visible. This choice stays in this browser.</p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+        {panelNavItems.filter((item) => item.href !== "/settings").map((item) => (
+          <label key={item.href} className="flex items-center gap-2 text-sm text-gray-800 dark:text-gray-100">
+            <input type="checkbox" checked={!hidden.includes(item.href)} onChange={() => toggle(item.href)} />
+            {item.name}
+          </label>
+        ))}
       </div>
     </div>
   );
