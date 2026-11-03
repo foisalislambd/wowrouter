@@ -1,9 +1,9 @@
-module wowrouter/desktop
+module airoute/desktop
 
 go 1.26.5
 
 require (
-	wowrouter/server v0.0.0
+	airoute/server v0.0.0
 	github.com/getlantern/systray v1.2.2
 	github.com/jchv/go-webview2 v0.0.0-20260205173254-56598839c808
 	golang.org/x/sys v0.48.0
@@ -40,4 +40,4 @@ require (
 	modernc.org/sqlite v1.60.1 // indirect
 )
 
-replace wowrouter/server => ../server
+replace airoute/server => ../server

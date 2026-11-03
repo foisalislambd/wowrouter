@@ -60,25 +60,13 @@ node packages/cli/bin/wowrouter.js stop --addr 127.0.0.1:8793
 | Path | What it is |
 | --- | --- |
 | `apps/server` | Go router, SQLite, HTTP API |
-| `apps/panel` | Web UI (Vite), served at `/` |
+| `apps/panel` | React panel |
 | `apps/desktop` | Window, tray, and background agent |
 | `packages/cli` | The `wowrouter` and `airoute` npm commands |
 | `packages/sse` | Parser for OpenAI server-sent chat streams |
 | `docs` | These guides |
 
-The panel ships a short handwritten provider directory. It does not embed a generated model catalog.
-
-## Panel
-
-```bash
-npm run dev:panel
-```
-
-`npm run build:panel` writes `apps/panel/dist`. That folder is not committed. The Go server picks it up from the repo root, or when you pass `-web`. Sign in with the admin token from `bootstrap-token`. See [Getting started](gateway/getting-started.md).
-
-## Benchmark
-
-`npm run bench` builds the router and runs the local benchmark. The method and the latest measured results are in [Benchmarks](benchmarks.md). `./bench/run.sh -quick` is a short smoke run.
+The catalog of providers is generated. Change the generator and regenerate. Do not hand-edit `apps/server/internal/catalog/catalog_generated.go`.
 
 ## Tests
 

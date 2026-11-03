@@ -14,11 +14,11 @@ var (
 )
 
 func acquireAgentLock() (func(), bool) {
-	return acquireNamedLock(`Local\WowRouter.Agent`)
+	return acquireNamedLock(`Local\AIRoute.Agent`)
 }
 
 func acquireUILock() (func(), bool) {
-	return acquireNamedLock(`Local\WowRouter.UI`)
+	return acquireNamedLock(`Local\AIRoute.UI`)
 }
 
 func acquireNamedLock(raw string) (func(), bool) {

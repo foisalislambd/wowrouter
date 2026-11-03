@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	"wowrouter/server/app"
+	"airoute/server/app"
 )
 
 func acquireAgentLock() (func(), bool) {

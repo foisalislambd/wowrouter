@@ -17,7 +17,13 @@ func setStartWithWindows(on bool) error {
 	}
 	defer key.Close()
 	if !on {
-		return deleteRunValue(key, "WowRouter")
+		if err = deleteRunValue(key, "WowRouter"); err != nil {
+			return err
+		}
+		return deleteRunValue(key, "AIRoute")
+	}
+	if err = deleteRunValue(key, "AIRoute"); err != nil {
+		return err
 	}
 	exe, err := os.Executable()
 	if err != nil {

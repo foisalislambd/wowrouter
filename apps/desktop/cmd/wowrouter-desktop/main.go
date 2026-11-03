@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"wowrouter/server/app"
-	"wowrouter/server/desktoppref"
+	"airoute/server/app"
+	"airoute/server/desktoppref"
 )
 
 func main() {
@@ -34,12 +34,12 @@ func main() {
 			err = errors.New("WowRouter is not running.")
 			break
 		}
-		err = openWindow("http://" + address + "/")
+		err = openWindow("http://" + address)
 	case "agent":
 		err = runAgent(address, false)
 	default:
 		if app.Probe(address) {
-			err = openWindow("http://" + address + "/")
+			err = openWindow("http://" + address)
 			break
 		}
 		err = runAgent(address, true)
@@ -51,8 +51,10 @@ func main() {
 }
 
 func listenAddr() string {
-	if value := strings.TrimSpace(os.Getenv("WOWROUTER_ADDR")); value != "" {
-		return value
+	for _, key := range []string{"WOWROUTER_ADDR", "AIROUTE_ADDR"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
 	}
 	return "127.0.0.1:8787"
 }
@@ -85,7 +87,7 @@ func updateStart(dir string, on bool) error {
 func runAgent(address string, openUI bool) error {
 	if app.Probe(address) {
 		if openUI {
-			return openWindow("http://" + address + "/")
+			return openWindow("http://" + address)
 		}
 		return nil
 	}
@@ -97,7 +99,7 @@ func runAgent(address string, openUI bool) error {
 		if !waitReady(address) {
 			return errors.New("WowRouter is already starting, but it did not become ready.")
 		}
-		return openWindow("http://" + address + "/")
+		return openWindow("http://" + address)
 	}
 	defer release()
 

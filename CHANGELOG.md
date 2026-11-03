@@ -4,11 +4,8 @@ Versions follow the `version` field in the root `package.json`. Releases are pub
 
 ## Unreleased
 
-- One gateway and one Vite panel, served at `/`. `/ui` redirects there.
-- The database is `wowrouter.db` in the `wowrouter` data folder. First start imports providers, provider keys, models, fallbacks, and settings from an older install and leaves those files in place. Old router keys are not imported. Create new keys; they start with `sk-wowrouter-`.
-- npm, Docker Hub, and GitHub Packages still publish the `airoute` package name, the `airoute` command, and the `foisalislambd/airoute` and `ghcr.io/foisalislambd/airoute` images. Those names are the same WowRouter build.
-- The panel follows the Antirion console layout and is served at `/`. It is derived from that console, Copyright 2026 Elias Biondo, Apache-2.0, and was modified. See NOTICE.
-- The provider directory includes the models.dev catalog. A provider can hold more than one API key. The activity-log queue is capped so a busy closed loop does not hold hundreds of megabytes of pending rows.
+- The product name is WowRouter. npm, Docker Hub, and GitHub Packages still publish `airoute`, and they also publish `wowrouter`.
+- Existing data stays in the `airoute-router` folder, in `airoute.db`. Router keys still start with `sk-airoute-`.
 
 ## 1.1.2
 

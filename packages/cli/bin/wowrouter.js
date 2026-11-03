@@ -33,8 +33,8 @@ function parseArgs(argv) {
 }
 
 function urls(addr) {
-  const panel = `http://${addr}/`;
-  return { panel, api: `http://${addr}/v1` };
+  const panel = `http://${addr}`;
+  return { panel, api: `${panel}/v1` };
 }
 
 function binaryPath() {
@@ -49,7 +49,7 @@ async function probe(addr) {
   try {
     const res = await fetch(`http://${addr}/health`, { signal: ctrl.signal });
     const body = await res.json();
-    return res.ok && body.service === "wowrouter";
+    return res.ok && (body.service === "wowrouter" || body.service === "airoute");
   } catch {
     return false;
   } finally {
@@ -114,11 +114,11 @@ async function start(opts) {
   if (!bin) {
     throw new Error(`No WowRouter program is packaged for ${process.platform}-${process.arch}.`);
   }
-  const panelDir = path.join(root, "panel");
-  if (!fs.existsSync(path.join(panelDir, "index.html"))) {
+  const panel = path.join(root, "panel");
+  if (!fs.existsSync(path.join(panel, "index.html"))) {
     throw new Error("The web panel is missing from this install.");
   }
-  const args = ["-addr", opts.addr, "-web", panelDir];
+  const args = ["-addr", opts.addr, "-web", panel];
   if (opts.data) args.push("-data", opts.data);
   const child = spawn(bin, args, {
     detached: opts.detach,

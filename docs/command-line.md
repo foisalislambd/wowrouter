@@ -35,7 +35,7 @@ wowrouter status --addr 127.0.0.1:8787
 
 ## Already running
 
-If something is already answering on that port and its health check reports `"service":"wowrouter"`, the command does not start a second copy. It prints the URLs. With the default start command, it also opens the panel.
+If something is already answering on that port and it is WowRouter, the command does not start a second copy. It prints the URLs. With the default start command, it also opens the panel. A process that still reports `"service":"airoute"` counts as the same router.
 
 `wowrouter stop` works on a router started by this npm package. If you are running an older desktop build that has no shutdown button in the API, quit that one from the tray icon instead. See [Desktop](desktop.md).
 

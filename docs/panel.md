@@ -1,6 +1,6 @@
 # Panel
 
-The panel is the web page at `http://127.0.0.1:8787`. You use it to manage providers, models, routing, and the key your tools send. The first start prints an admin token and writes `bootstrap-token` in the data folder. Sign in with that token. The page is meant to stay on this computer.
+The panel is the web page at `http://127.0.0.1:8787`. You use it to manage providers, models, and the key your tools send. The page does not ask you to log in. It is only available on this computer.
 
 ## Pages
 
@@ -8,15 +8,11 @@ The panel is the web page at `http://127.0.0.1:8787`. You use it to manage provi
 | --- | --- |
 | Overview | See that the router is up, and how many keys and calls you have |
 | Providers | Save a provider key, set a base URL, and turn models on |
-| Models | Name a virtual model and the order it should try |
-| Routing | Pick cheapest, fastest, or a split across deployments |
 | Fallback | Choose a backup chat model if the first one fails |
-| API keys | Create the key Cursor will use, and set a spend or rate cap |
-| Safety | Keep phrases and JSON checks that run on a call |
-| Budgets | See spend against the caps on your keys |
+| API keys | Create the key Cursor will use |
 | Playground | Try a prompt, an image, or a decision before you wire up a tool |
 | Activity | Read one call at a time, including the request that was sent |
-| Usage and Analytics | See calls grouped by model |
+| Usage | See calls grouped by model |
 | Settings | See the data folder and the listen address. On Windows, start with Windows |
 
 ## A normal first visit
@@ -25,7 +21,7 @@ The panel is the web page at `http://127.0.0.1:8787`. You use it to manage provi
 2. Open the provider you have an account with, such as OpenAI.
 3. Paste that provider's own API key and save it.
 4. Turn on one model. A model that is off will not show up for Cursor.
-5. Open **API keys** and create a key. Copy it now. It starts with `sk-wowrouter-` and the panel will not show the full secret again.
+5. Open **API keys** and create a key. Copy it now. It starts with `sk-airoute-` and the panel will not show the full secret again.
 6. Open **Playground**, pick that model, and send a short prompt.
 
 If the playground replies, Cursor can use the same model. The [Cursor guide](use-with-cursor.md) is the next step.
@@ -38,7 +34,7 @@ Loading replaces the list already stored for that provider. Use it when the page
 
 ## Playground
 
-The playground calls the local router. It does not need the `sk-wowrouter-` key, because you are already signed in.
+The playground calls the local router. It does not need the `sk-airoute-` key, because you are already on the panel.
 
 - Chat and media use the model you pick and the text you type.
 - A decision model expects a state and questions. You can type plain text, which becomes one yes/no question, or paste JSON. See [Decisions](decisions.md).

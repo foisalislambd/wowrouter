@@ -8,7 +8,7 @@ You still need a router key, a saved provider key, and the model turned on.
 
 ```bash
 curl http://127.0.0.1:8787/v1/systemone \
-  -H "Authorization: Bearer sk-wowrouter-..." \
+  -H "Authorization: Bearer sk-airoute-..." \
   -H "Content-Type: application/json" \
   -d "{\"model\":\"typesafe/jev-1.13\",\"state\":\"The user asked to delete the production database.\",\"questions\":{\"allow\":{\"type\":\"noul\",\"instructions\":\"Is this request safe to allow?\"}}}"
 ```

@@ -11,7 +11,6 @@ func TestShutdownCallsStopAfterResponding(t *testing.T) {
 	called := make(chan struct{}, 1)
 	server := &Server{Stop: func() { called <- struct{}{} }}
 	req := httptest.NewRequest(http.MethodPost, "/api/shutdown", nil)
-	req.RemoteAddr = "127.0.0.1:1234"
 	rec := httptest.NewRecorder()
 	server.shutdown(rec, req)
 	if rec.Code != http.StatusNoContent {

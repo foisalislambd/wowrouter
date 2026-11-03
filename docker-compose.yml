@@ -4,11 +4,6 @@ services:
     build: .
     ports:
       - "127.0.0.1:8787:8787"
-    environment:
-      # The process binds 0.0.0.0 inside the container. This opt-in keeps the
-      # published loopback example working. Remove it and set
-      # WOWROUTER_ADMIN_PASSWORD when the host port is reachable by others.
-      WOWROUTER_PUBLIC_BIND: token
     volumes:
       - wowrouter:/data
     restart: unless-stopped

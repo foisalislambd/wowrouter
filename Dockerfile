@@ -31,9 +31,10 @@ RUN ln -s wowrouter /usr/local/bin/airoute \
   'exec su-exec wowrouter /usr/local/bin/wowrouter "$@"' \
   > /entrypoint.sh && chmod 755 /entrypoint.sh
 ENV WOWROUTER_IN_DOCKER=1
+ENV AIROUTE_IN_DOCKER=1
 EXPOSE 8787
 VOLUME /data
 HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8787/health | grep -Eq '"service":"wowrouter"' || exit 1
+  CMD wget -qO- http://127.0.0.1:8787/health | grep -Eq '"service":"(wowrouter|airoute)"' || exit 1
 ENTRYPOINT ["/entrypoint.sh"]
 CMD ["-addr", "0.0.0.0:8787", "-data", "/data", "-web", "/panel"]

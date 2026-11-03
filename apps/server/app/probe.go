@@ -25,5 +25,5 @@ func Probe(addr string) bool {
 	if json.NewDecoder(io.LimitReader(resp.Body, 1024)).Decode(&body) != nil {
 		return false
 	}
-	return body.Service == "wowrouter"
+	return body.Service == "wowrouter" || body.Service == "airoute"
 }

@@ -3,8 +3,6 @@
 node_modules
 **/node_modules
 apps/panel/dist
-apps/console/.next
-apps/console/out
 apps/desktop
 docs
 dist

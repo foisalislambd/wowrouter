@@ -21,8 +21,8 @@ func TestProbe(t *testing.T) {
 		_, _ = w.Write([]byte(`{"status":"ok","service":"airoute"}`))
 	}))
 	defer legacy.Close()
-	if Probe(legacy.Listener.Addr().String()) {
-		t.Fatal("an older health service name is not this router")
+	if !Probe(legacy.Listener.Addr().String()) {
+		t.Fatal("an older airoute health response is still this router")
 	}
 	if Probe("127.0.0.1:1") {
 		t.Fatal("closed port should not look healthy")

@@ -40,7 +40,9 @@ Open `http://127.0.0.1:8787/health` in a browser. A healthy router answers:
 {"service":"wowrouter","status":"ok"}
 ```
 
-If the page does not load, the router is not running. Start it again with `wowrouter`, or by opening the desktop app. The first start writes `bootstrap-token` in the data folder. Sign in to the panel with that token.
+An older build may still answer `"service":"airoute"`. That is the same router.
+
+If the page does not load, the router is not running. Start it again with `wowrouter`, or by opening the desktop app.
 
 ## What to do next
 
