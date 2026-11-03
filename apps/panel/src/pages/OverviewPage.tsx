@@ -31,7 +31,6 @@ export default function OverviewPage() {
     <div>
       <PanelPageHeader
         title="Overview"
-        description="One local endpoint and one router key for every coding agent. Provider keys stay on this computer."
         actions={data ? <CopyButton text={data.endpoint} label="Copy endpoint" /> : <Link to="/providers" className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white">Add a provider</Link>}
       />
       <ErrorNote>{error}</ErrorNote>

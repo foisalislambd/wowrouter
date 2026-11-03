@@ -51,7 +51,6 @@ export default function ActivityPage() {
     <div>
       <PanelPageHeader
         title="Activity"
-        description="Every call this router stored, with the model, status, and latency."
         actions={
           <>
             <a href="/api/activity/export" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-200">Export CSV</a>

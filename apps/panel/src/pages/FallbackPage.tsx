@@ -95,7 +95,7 @@ export default function FallbackPage() {
 
   return (
     <div>
-      <PanelPageHeader title="Routing" description="Auto picks a model. A combo is a named list your client calls as one model id." />
+      <PanelPageHeader title="Routing" />
       <PageTabs tabs={routeTabs} />
       {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
       <section className="panel-card panel-card-body mb-4">

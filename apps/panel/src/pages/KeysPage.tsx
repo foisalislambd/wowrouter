@@ -55,10 +55,7 @@ export default function KeysPage() {
 
   return (
     <div>
-      <PanelPageHeader
-        title="API keys"
-        description="One sk-airoute- key for Cursor, Claude Code, and other clients. The secret is shown only once."
-      />
+      <PanelPageHeader title="API keys" />
       <PageTabs tabs={keyTabs} />
       <ErrorNote>{error}</ErrorNote>
       {created && (

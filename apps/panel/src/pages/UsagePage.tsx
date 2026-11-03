@@ -33,7 +33,6 @@ export default function UsagePage() {
     <div>
       <PanelPageHeader
         title="Usage"
-        description="Requests, tokens, and catalog cost for calls stored on this computer."
         actions={
           <select aria-label="Date range" value={range} onChange={(event) => setRange(Number(event.target.value))} className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm dark:border-gray-700 dark:bg-white/5 dark:text-white">
             <option value={7}>7 days</option>

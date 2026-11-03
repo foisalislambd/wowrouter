@@ -373,9 +373,6 @@ export default function ProviderPage() {
           ) : null
         }
       />
-      {provider?.summary && (
-        <p className="mb-4 max-w-3xl text-sm text-gray-600 dark:text-gray-300">{provider.summary}</p>
-      )}
       {health && (
         <p className="mb-4 text-sm text-gray-500">
           Stored calls: {health.requests} · errors {health.errors} · average latency {health.requests ? `${health.avgLatencyMs} ms` : "—"}

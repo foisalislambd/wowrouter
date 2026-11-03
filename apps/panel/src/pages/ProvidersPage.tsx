@@ -139,7 +139,6 @@ export default function ProvidersPage() {
       <div className="sticky top-0 z-10 -mx-4 mb-4 bg-[#f9fafb]/95 px-4 pt-1 pb-3 backdrop-blur-sm sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8 dark:bg-[#101828]/95">
       <PanelPageHeader
         title="Providers"
-        description="Save a key, test the connection, and turn on the models a coding agent should see."
         actions={
           <label className="relative block w-full sm:w-72">
             <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-gray-400" />

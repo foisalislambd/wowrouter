@@ -59,7 +59,6 @@ export default function ClientsPage() {
     <div>
       <PanelPageHeader
         title="Clients"
-        description="Point an OpenAI-compatible tool at this base URL and paste a router key. Use auto when WowRouter should pick a turned-on chat model."
         actions={baseUrl ? <CopyButton text={baseUrl} label="Copy base URL" /> : undefined}
       />
       {error && <p className="mb-4 text-sm text-error-500">{error}</p>}

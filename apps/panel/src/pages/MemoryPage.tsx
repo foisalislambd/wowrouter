@@ -42,7 +42,7 @@ export default function MemoryPage() {
 
   return (
     <div>
-      <PanelPageHeader title="Memory" description="Notes are prepended to chat calls only when Memory is on in Settings. A request can skip them with X-WowRouter-No-Memory: 1." />
+      <PanelPageHeader title="Memory" />
       <PageTabs tabs={localTabs} />
       <ErrorNote>{error}</ErrorNote>
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 space-y-3">

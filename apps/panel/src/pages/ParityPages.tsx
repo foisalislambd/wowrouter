@@ -46,10 +46,10 @@ import {
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 
-function Frame({ title, lede, children, tabs, actions }: { title: string; lede: string; children: ReactNode; tabs?: PageTab[]; actions?: ReactNode }) {
+function Frame({ title, children, tabs, actions }: { title: string; children: ReactNode; tabs?: PageTab[]; actions?: ReactNode }) {
   return (
     <div>
-      <PanelPageHeader title={title} description={lede} actions={actions} />
+      <PanelPageHeader title={title} actions={actions} />
       {tabs && <PageTabs tabs={tabs} />}
       {children}
     </div>
@@ -110,7 +110,7 @@ export function ModelsPage() {
   }
   const total = data?.total ?? 0;
   return (
-    <Frame title="Models" lede="Every model stored for every provider. Turn a model on from its provider page before a client can call it.">
+    <Frame title="Models">
       <ErrorNote>{error}</ErrorNote>
       <div className="mb-4 flex flex-col gap-2 sm:flex-row">
         <input value={q} onChange={(event) => { setQ(event.target.value); setParam("q", event.target.value); }} placeholder="Search models" aria-label="Search models" className={field + " max-w-md"} />
@@ -173,7 +173,7 @@ function ModelTable({ models }: { models: CatalogModel[] }) {
 export function QuotaPage() {
   const { data, error } = useLoad(() => quotaSlots());
   return (
-    <Frame title="Quota" tabs={routeTabs} lede="Rate-limit headers providers sent on recent calls. A slot appears after the first response that includes them. Combo strategies fill-first, headroom, reset-window, quota-weighted, and quota-share read this table.">
+    <Frame title="Quota" tabs={routeTabs}>
       {error && <p className="text-sm text-error-500">{error}</p>}
       <div className="grid gap-3">
         {(data?.slots ?? []).map((slot) => (
@@ -191,7 +191,7 @@ export function QuotaPage() {
 export function EndpointsPage() {
   const { data, error } = useLoad(() => endpointList());
   return (
-    <Frame title="Endpoints" tabs={endpointTabs} lede="The local routes this process serves. Clients use a router key on /v1. The panel uses the /api routes.">
+    <Frame title="Endpoints" tabs={endpointTabs}>
       {error && <p className="text-sm text-error-500">{error}</p>}
       <p className="mb-3 font-mono text-sm text-gray-800 dark:text-gray-100">{data?.base}</p>
       <div className="grid gap-2">
@@ -223,7 +223,7 @@ export function TranslatorPage() {
     }
   }
   return (
-    <Frame title="Translator" tabs={endpointTabs} lede="Converts a text chat body between OpenAI and Anthropic shapes on this computer. It does not call a provider.">
+    <Frame title="Translator" tabs={endpointTabs}>
       <form onSubmit={onSubmit} className="panel-card panel-card-body space-y-3">
         <select value={direction} onChange={(event) => setDirection(event.target.value)} className={field}>
           <option value="openai-to-anthropic">OpenAI to Anthropic</option>
@@ -241,7 +241,7 @@ export function TranslatorPage() {
 export function HealthPage() {
   const { data, error } = useLoad(() => healthDetail());
   return (
-    <Frame title="Health" tabs={healthTabs} lede="Process and catalog counts. This is not a remote status page. GET /health stays the process check.">
+    <Frame title="Health" tabs={healthTabs}>
       {error && <p className="text-sm text-error-500">{error}</p>}
       {data && (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -289,9 +289,9 @@ export function ChaosPage() {
       setError(err instanceof Error ? err.message : "Could not save");
     }
   }
-  if (!form) return <Frame title="Chaos" lede="Loading…">{error && <p className="text-sm text-error-500">{error}</p>}</Frame>;
+  if (!form) return <Frame title="Chaos">{error ? <p className="text-sm text-error-500">{error}</p> : <LoadingBlock />}</Frame>;
   return (
-    <Frame title="Chaos" tabs={healthTabs} lede="Off by default. When it is on, chat calls can be delayed or rejected before they leave this computer. Use it to test a client, then turn it off.">
+    <Frame title="Chaos" tabs={healthTabs}>
       <form onSubmit={onSave} className="panel-card panel-card-body space-y-3 text-sm">
         <label className="flex items-center gap-2"><input type="checkbox" checked={form.chaos} onChange={(event) => setForm({ ...form, chaos: event.target.checked })} /> Enable chaos</label>
         <label>Fail percent <input type="number" min={0} max={100} value={form.chaosFailPercent} onChange={(event) => setForm({ ...form, chaosFailPercent: Number(event.target.value) })} className={field} /></label>
@@ -321,7 +321,7 @@ export function ProxyPage() {
     }
   }
   return (
-    <Frame title="Upstream proxy" tabs={healthTabs} lede="Optional HTTP proxy for calls WowRouter makes to providers. Empty means a direct connection. This is not TLS interception.">
+    <Frame title="Upstream proxy" tabs={healthTabs}>
       <form onSubmit={onSave} className="panel-card panel-card-body space-y-3">
         <input value={proxy} onChange={(event) => setProxy(event.target.value)} placeholder="http://127.0.0.1:8888" className={field} />
         {error && <p className="text-sm text-error-500">{error}</p>}
@@ -334,7 +334,7 @@ export function ProxyPage() {
 export function ConsolePage() {
   const { data, error, reload } = useLoad(() => consoleLines());
   return (
-    <Frame title="Console" tabs={healthTabs} lede="Events this process recorded for webhooks, cache clears, and guard changes. Request errors stay on Activity.">
+    <Frame title="Console" tabs={healthTabs}>
       {error && <p className="text-sm text-error-500">{error}</p>}
       <button type="button" onClick={reload} className={button}>Refresh</button>
       <pre className="panel-card panel-card-body mt-3 overflow-x-auto text-xs">{(data?.lines ?? []).join("\n") || "No events yet."}</pre>
@@ -345,7 +345,7 @@ export function ConsolePage() {
 export function CostsPage() {
   const { data, error } = useLoad(() => costReport());
   return (
-    <Frame title="Costs" tabs={costTabs} lede="Catalog price times the tokens stored on each call. Streaming calls without a token count stay at zero.">
+    <Frame title="Costs" tabs={costTabs}>
       {error && <p className="text-sm text-error-500">{error}</p>}
       <p className="mb-3 text-sm font-medium">Recorded spend ${data?.totalUsd.toFixed(4) ?? "0"}</p>
       {(data?.byModel ?? []).map((row) => (
@@ -358,7 +358,7 @@ export function CostsPage() {
 export function PricingPage() {
   const { data, error } = useLoad(() => catalogModels({ limit: 40, priced: true }));
   return (
-    <Frame title="Pricing" tabs={costTabs} lede="Input and output USD per million tokens from the catalog. Rows with no stored price are left off this list.">
+    <Frame title="Pricing" tabs={costTabs}>
       {error && <p className="text-sm text-error-500">{error}</p>}
       <ModelTable models={data?.models ?? []} />
     </Frame>
@@ -368,7 +368,7 @@ export function PricingPage() {
 export function FreePage() {
   const { data, error } = useLoad(() => freeProviders());
   return (
-    <Frame title="Free tiers" tabs={costTabs} lede="Providers the catalog marks free. A free flag is not a promise that the upstream quota is still open.">
+    <Frame title="Free tiers" tabs={costTabs}>
       {error && <p className="text-sm text-error-500">{error}</p>}
       <div className="grid gap-3">
         {(data?.providers ?? []).slice(0, 40).map((provider) => (
@@ -400,7 +400,7 @@ export function TeamsPage() {
     }
   }
   return (
-    <Frame title="Teams" tabs={costTabs} lede="A team cap is shared by the router keys you list. A call is refused when the team's month spend reaches the cap.">
+    <Frame title="Teams" tabs={costTabs}>
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 grid gap-2 sm:grid-cols-4">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Team name" className={field} />
@@ -439,7 +439,7 @@ export function LimitsPage() {
     }
   }
   return (
-    <Frame title="Limits" tabs={keyTabs} lede="Monthly dollar caps are set on each API key. This page sets an optional requests-per-minute cap for every router key. Zero means no per-minute cap. Playground calls are not counted.">
+    <Frame title="Limits" tabs={keyTabs}>
       <form onSubmit={onSave} className="panel-card panel-card-body space-y-3">
         <input type="number" min={0} max={600} value={rpm} onChange={(event) => setRpm(Number(event.target.value))} className={field + " max-w-xs"} />
         {error && <p className="text-sm text-error-500">{error}</p>}
@@ -466,7 +466,7 @@ export function WebhooksPage() {
     }
   }
   return (
-    <Frame title="Webhooks" lede="After each stored call, WowRouter POSTs a small JSON body to every saved URL. The secret is encrypted here and sent as an HMAC-SHA256 of the body in X-WowRouter-Signature. Use https, or http on localhost.">
+    <Frame title="Webhooks">
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
         <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/hook" className={field} />
@@ -490,7 +490,7 @@ export function BatchesPage() {
   const files = useLoad(() => localFiles());
   const batches = useLoad(() => localBatches());
   return (
-    <Frame title="Batches" lede="Files and batch jobs created through POST /v1/files and POST /v1/batches. A batch is at most 40 JSONL lines and runs on this computer.">
+    <Frame title="Batches">
       <h2 className="mb-2 text-sm font-semibold">Files</h2>
       {(files.data?.files ?? []).map((file) => <p key={file.id} className="text-sm">{file.filename} · {file.bytes} bytes · {file.purpose}</p>)}
       {files.data && files.data.files.length === 0 && <EmptyState title="No files" body="POST /v1/files with a router key stores a file here. Batches accept at most 40 JSONL lines." />}
@@ -505,7 +505,7 @@ export function BatchesPage() {
 export function CachePage() {
   const { data, error, reload } = useLoad(() => cacheStats());
   return (
-    <Frame title="Cache" tabs={localTabs} lede="Non-streaming chat replies stored on this computer when the response cache is on in Settings. Streaming calls are not cached.">
+    <Frame title="Cache" tabs={localTabs}>
       {error && <p className="text-sm text-error-500">{error}</p>}
       <p className="text-sm">Enabled: {data?.enabled ? "yes" : "no"}. Entries: {data?.entries ?? 0}. TTL {data?.ttl ?? 0}s. Oldest {data?.oldest || "—"}.</p>
       <DangerButton label="Clear cache" title="Clear cached replies?" body="The next matching call will ask the provider again." onConfirm={async () => { await clearCache(); reload(); }} />
@@ -529,7 +529,7 @@ export function CompressionPage() {
     }
   }
   return (
-    <Frame title="Compression" tabs={localTabs} lede="Local text rewrites. Pick the mode in Settings to apply it to chat calls. Neural compressors such as LLMLingua are not bundled.">
+    <Frame title="Compression" tabs={localTabs}>
       <form onSubmit={onPreview} className="panel-card panel-card-body space-y-3">
         <select value={mode} onChange={(event) => setMode(event.target.value)} className={field}>
           {["light", "caveman", "dedup", "headroom", "rtk", "terse", "ultra"].map((item) => <option key={item}>{item}</option>)}
@@ -547,7 +547,7 @@ export function AuditPage() {
   const [source, setSource] = useState("mcp");
   const { data, error } = useLoad(() => auditLogs(source), [source]);
   return (
-    <Frame title="Audit" tabs={activityTabs} lede="Calls whose source is MCP, A2A, an eval run, or a batch job.">
+    <Frame title="Audit" tabs={activityTabs}>
       <select value={source} onChange={(event) => setSource(event.target.value)} className={field + " mb-3 max-w-xs"}>
         <option value="mcp">MCP</option>
         <option value="a2a">A2A</option>
@@ -566,7 +566,7 @@ export function AuditPage() {
 export function SearchPage() {
   const { data, error } = useLoad(() => catalogModels({ kind: "search", limit: 40 }));
   return (
-    <Frame title="Search tools" lede="Search-kind models in the catalog. Turn one on, then call it from the Playground or POST /v1/chat/completions.">
+    <Frame title="Search tools">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <ModelTable models={data?.models ?? []} />
     </Frame>
@@ -591,7 +591,7 @@ export function MediaPage() {
     setResult(JSON.stringify(body, null, 2).slice(0, 2000));
   }
   return (
-    <Frame title="Media" lede="Image models. The call uses the same path as the Playground media request and needs the provider key already saved.">
+    <Frame title="Media">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <form onSubmit={onSubmit} className="panel-card panel-card-body mb-4 space-y-3">
         <select value={model} onChange={(event) => setModel(event.target.value)} className={field}>
@@ -624,7 +624,7 @@ export function SkillsPage() {
     }
   }
   return (
-    <Frame title="Skills" tabs={agentTabs} lede="Instructions you keep on this computer. They are not executed as code. Copy one into a prompt, or let an A2A client read the agent card at /.well-known/agent-card.json.">
+    <Frame title="Skills" tabs={agentTabs}>
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 space-y-2">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" className={field} />
@@ -658,7 +658,7 @@ export function EvalsPage() {
     }
   }
   return (
-    <Frame title="Evals" lede="A run sends the prompt through the local router and passes when the reply contains the expected text.">
+    <Frame title="Evals">
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 grid gap-2">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" className={field} />
@@ -701,7 +701,7 @@ export function AgentsPage() {
     }
   }
   return (
-    <Frame title="Agents" tabs={agentTabs} lede="Cloud agents Jules, Devin, and Codex Cloud are providers. CLI and ACP notes are records only: WowRouter does not launch a shell or speak a private agent protocol.">
+    <Frame title="Agents" tabs={agentTabs}>
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 grid gap-2 sm:grid-cols-4">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" className={field} />
@@ -742,7 +742,7 @@ export function ServicesPage() {
     }
   }
   return (
-    <Frame title="Services" lede="Bookmarks for other local tools. The link opens in your browser. WowRouter does not proxy or embed them.">
+    <Frame title="Services">
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" className={field} />
@@ -762,7 +762,7 @@ export function ServicesPage() {
 export function ChangelogPage() {
   const { data, error } = useLoad(() => changelogText());
   return (
-    <Frame title="Changelog" lede="The CHANGELOG.md shipped with this checkout.">
+    <Frame title="Changelog">
       {error && <p className="text-sm text-error-500">{error}</p>}
       {data?.markdown ? <MarkdownView text={data.markdown} /> : <p className="text-sm text-gray-500">Changelog file was not found next to the panel build.</p>}
     </Frame>
@@ -772,7 +772,7 @@ export function ChangelogPage() {
 export function OnboardingPage() {
   const { data, error } = useLoad(() => onboardingSteps());
   return (
-    <Frame title="Onboarding" lede="Checked against this database. The password step is done while the panel stays open without a login.">
+    <Frame title="Onboarding">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <div className="grid gap-2">
         {(data?.steps ?? []).map((step) => (

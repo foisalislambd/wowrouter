@@ -148,7 +148,6 @@ export default function SettingsPage() {
     <div>
       <PanelPageHeader
         title="Settings"
-        description="Password and sign-in stay off until you turn them on. Provider keys and router keys are separate."
         actions={<Link to="/changelog" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-200">Changelog</Link>}
       />
       {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
