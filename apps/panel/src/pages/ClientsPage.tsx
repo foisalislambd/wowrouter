@@ -1,4 +1,5 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
+import { CopyButton } from "@/components/ui/feedback";
 import { getClients, listClientTargets, restoreClientConfig, writeClientConfig, type ClientSnippet, type ClientTarget } from "@/lib/api";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -56,11 +57,10 @@ export default function ClientsPage() {
 
   return (
     <div>
-      <PanelPageHeader title="Clients" />
-      <p className="mb-4 max-w-2xl text-sm text-gray-600 dark:text-gray-300">
-        Point an OpenAI-compatible tool at <span className="font-mono text-xs">{baseUrl || "…"}</span> and paste a router key from API keys.
-        Use <span className="font-mono text-xs">auto</span> when you want WowRouter to pick a turned-on chat model.
-      </p>
+      <PanelPageHeader
+        title="Clients"
+        actions={baseUrl ? <CopyButton text={baseUrl} label="Copy base URL" /> : undefined}
+      />
       {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
       {notice && <p className="mb-4 text-sm text-success-600">{notice}</p>}
       <section className="panel-card panel-card-body mb-4 space-y-3">

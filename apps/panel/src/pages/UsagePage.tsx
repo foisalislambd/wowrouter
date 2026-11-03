@@ -1,6 +1,9 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
+import { Bars } from "@/components/ui/bars";
+import { EmptyState, ErrorNote, LoadingBlock } from "@/components/ui/feedback";
 import { getUsage, type UsageDay, type UsageRow } from "@/lib/api";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 
 function money(value: number) {
   return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
@@ -9,25 +12,37 @@ function money(value: number) {
 export default function UsagePage() {
   const [rows, setRows] = useState<UsageRow[]>([]);
   const [days, setDays] = useState<UsageDay[]>([]);
+  const [range, setRange] = useState(14);
+  const [loading, setLoading] = useState(true);
   const [totals, setTotals] = useState({ requests: 0, errors: 0, promptTokens: 0, completionTokens: 0, costUsd: 0 });
   const [error, setError] = useState("");
 
   useEffect(() => {
-    getUsage()
+    setLoading(true);
+    getUsage(range)
       .then((result) => {
         setRows(result.rows);
         setDays(result.days ?? []);
         setTotals(result.totals);
       })
-      .catch((err: Error) => setError(err.message));
-  }, []);
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
+  }, [range]);
 
   return (
     <div>
       <PanelPageHeader
         title="Usage"
+        actions={
+          <select aria-label="Date range" value={range} onChange={(event) => setRange(Number(event.target.value))} className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm dark:border-gray-700 dark:bg-white/5 dark:text-white">
+            <option value={7}>7 days</option>
+            <option value={14}>14 days</option>
+            <option value={30}>30 days</option>
+          </select>
+        }
       />
-      {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
+      <ErrorNote>{error}</ErrorNote>
+      {loading && <LoadingBlock label="Loading usage…" />}
       <div className="mb-4 grid gap-3 sm:grid-cols-4">
         {[
           ["Requests", String(totals.requests)],
@@ -42,23 +57,13 @@ export default function UsagePage() {
         ))}
       </div>
       {days.length > 0 && (
-        <div className="panel-card panel-card-body mb-4">
-          <p className="text-xs tracking-wide text-gray-500 uppercase">Last 14 days</p>
-          <div className="mt-3 flex h-24 items-end gap-1">
-            {days.map((day) => {
-              const peak = Math.max(...days.map((item) => item.requests), 1);
-              return (
-                <div key={day.day} className="flex h-full flex-1 flex-col justify-end" title={`${day.day}: ${day.requests} requests, ${money(day.costUsd)}`}>
-                  <div className="rounded-sm bg-brand-500/80" style={{ height: `${Math.max(4, (day.requests / peak) * 100)}%` }} />
-                </div>
-              );
-            })}
-          </div>
+        <div className="mb-4">
+          <Bars points={days.map((day) => ({ key: day.day, label: day.day.slice(5), value: day.requests, title: `${day.day}: ${day.requests} requests, ${money(day.costUsd)}` }))} />
         </div>
       )}
       <div className="panel-card overflow-hidden">
         {rows.length === 0 ? (
-          <p className="p-4 text-sm text-gray-500">No requests yet.</p>
+          <EmptyState title="No requests in this range" body="Usage is counted from calls the router handled. Send one from a client or the playground." action={<Link to="/playground" className="text-sm font-medium text-brand-600">Open playground</Link>} />
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">

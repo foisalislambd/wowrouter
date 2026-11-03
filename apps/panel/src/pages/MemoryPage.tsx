@@ -1,4 +1,6 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
+import { DangerButton, EmptyState, ErrorNote, LoadingBlock, useToast } from "@/components/ui/feedback";
+import { localTabs, PageTabs } from "@/components/ui/page-tabs";
 import { addMemory, deleteMemory, listMemories, type MemoryNote } from "@/lib/api";
 import { useEffect, useState, type FormEvent } from "react";
 
@@ -7,11 +9,14 @@ export default function MemoryPage() {
   const [body, setBody] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const toast = useToast();
 
   useEffect(() => {
     listMemories()
       .then((result) => setNotes(result.memories))
-      .catch((err: Error) => setError(err.message));
+      .catch((err: Error) => setError(err.message))
+      .finally(() => setLoading(false));
   }, []);
 
   async function onAdd(event: FormEvent) {
@@ -22,6 +27,7 @@ export default function MemoryPage() {
       const saved = await addMemory(body.trim());
       setNotes((current) => [saved, ...current]);
       setBody("");
+      toast("Note saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the note");
     } finally {
@@ -30,22 +36,15 @@ export default function MemoryPage() {
   }
 
   async function onDelete(id: string) {
-    setError("");
-    try {
-      await deleteMemory(id);
-      setNotes((current) => current.filter((item) => item.id !== id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete the note");
-    }
+    await deleteMemory(id);
+    setNotes((current) => current.filter((item) => item.id !== id));
   }
 
   return (
     <div>
       <PanelPageHeader title="Memory" />
-      <p className="mb-4 max-w-2xl text-sm text-gray-600 dark:text-gray-300">
-        Notes are prepended to chat calls only when Memory is turned on in Settings. A request can skip them with the header X-WowRouter-No-Memory: 1.
-      </p>
-      {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
+      <PageTabs tabs={localTabs} />
+      <ErrorNote>{error}</ErrorNote>
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 space-y-3">
         <textarea
           value={body}
@@ -61,12 +60,11 @@ export default function MemoryPage() {
         {notes.map((note) => (
           <section key={note.id} className="panel-card panel-card-body flex items-start justify-between gap-3">
             <p className="text-sm whitespace-pre-wrap text-gray-800 dark:text-gray-100">{note.body}</p>
-            <button type="button" onClick={() => onDelete(note.id)} className="shrink-0 text-sm text-error-500">
-              Delete
-            </button>
+            <DangerButton label="Delete" title="Delete this note?" body="Later chats will not include it." onConfirm={() => onDelete(note.id)} />
           </section>
         ))}
-        {notes.length === 0 && <p className="text-sm text-gray-500">No notes yet.</p>}
+        {loading && <LoadingBlock />}
+        {!loading && notes.length === 0 && <EmptyState title="No notes yet" body="Add a note, then turn Memory on in Settings if you want it sent with chat calls." />}
       </div>
     </div>
   );

@@ -13,10 +13,12 @@ export default function ProvidersPage() {
   const saved = useRef(readProviderListView());
   const urlQuery = params.get("q") ?? "";
   const urlCategory = params.get("category") || "all";
+  const urlState = params.get("state") || "all";
   const sameView = saved.current.q === urlQuery && saved.current.category === urlCategory;
   const [query, setQuery] = useState(urlQuery);
   const [debounced, setDebounced] = useState(urlQuery);
   const [category, setCategory] = useState(urlCategory);
+  const [state, setState] = useState(urlState);
   const [categories, setCategories] = useState<ProviderCategory[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [total, setTotal] = useState(0);
@@ -27,7 +29,7 @@ export default function ProvidersPage() {
   const generation = useRef(0);
   const restoreScroll = useRef(sameView ? saved.current.scroll : 0);
   const firstLimit = useRef(sameView ? Math.min(60, Math.max(PAGE_SIZE, saved.current.count)) : PAGE_SIZE);
-  const filters = useRef({ q: urlQuery, category: urlCategory });
+  const filters = useRef({ q: urlQuery, category: urlCategory, state: urlState });
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced(query.trim()), 200);
@@ -38,9 +40,10 @@ export default function ProvidersPage() {
     const next = new URLSearchParams();
     if (debounced) next.set("q", debounced);
     if (category !== "all") next.set("category", category);
+    if (state !== "all") next.set("state", state);
     if (next.toString() !== params.toString()) setParams(next, { replace: true });
-    const changed = filters.current.q !== debounced || filters.current.category !== category;
-    filters.current = { q: debounced, category };
+    const changed = filters.current.q !== debounced || filters.current.category !== category || filters.current.state !== state;
+    filters.current = { q: debounced, category, state };
     const view = readProviderListView();
     if (changed) {
       restoreScroll.current = 0;
@@ -54,14 +57,14 @@ export default function ProvidersPage() {
       scroll: changed ? 0 : view.scroll,
       count: providers.length || (changed ? PAGE_SIZE : view.count),
     });
-  }, [category, debounced, params, providers.length, setParams]);
+  }, [category, debounced, params, providers.length, setParams, state]);
 
   useEffect(() => {
     const request = ++generation.current;
     setLoading(true);
     setPaging(false);
     setError("");
-    listProviders({ q: debounced, category, limit: firstLimit.current, offset: 0 })
+    listProviders({ q: debounced, category, state, limit: firstLimit.current, offset: 0 })
       .then((page) => {
         if (generation.current !== request) return;
         setProviders(page.providers);
@@ -77,7 +80,7 @@ export default function ProvidersPage() {
           firstLimit.current = PAGE_SIZE;
         }
       });
-  }, [debounced, category]);
+  }, [debounced, category, state]);
 
   useLayoutEffect(() => {
     const top = restoreScroll.current;
@@ -112,7 +115,7 @@ export default function ProvidersPage() {
         started = true;
         observer.disconnect();
         setPaging(true);
-        listProviders({ q: debounced, category, limit: PAGE_SIZE, offset: providers.length })
+        listProviders({ q: debounced, category, state, limit: PAGE_SIZE, offset: providers.length })
           .then((page) => {
             if (generation.current !== request) return;
             setProviders((current) => appendUnique(current, page.providers));
@@ -129,7 +132,7 @@ export default function ProvidersPage() {
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [category, debounced, loading, providers.length, total]);
+  }, [category, debounced, loading, providers.length, state, total]);
 
   return (
     <div>
@@ -160,6 +163,14 @@ export default function ProvidersPage() {
           </label>
         }
       />
+      <label className="mt-2 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
+        Show
+        <select aria-label="Provider readiness" value={state} onChange={(event) => setState(event.target.value)} className="h-9 rounded-lg border border-gray-200 bg-white px-2 text-sm dark:border-gray-700 dark:bg-white/5 dark:text-white">
+          <option value="all">All providers</option>
+          <option value="ready">Ready</option>
+          <option value="setup">Needs setup</option>
+        </select>
+      </label>
       </div>
       {categories.length > 0 && (
         <div className="mb-4 flex flex-wrap gap-2">

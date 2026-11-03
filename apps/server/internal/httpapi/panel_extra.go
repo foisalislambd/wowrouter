@@ -35,7 +35,7 @@ func (s *Server) clearActivity(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) usage(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) usage(w http.ResponseWriter, r *http.Request) {
 	rows, err := s.Store.Usage()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
@@ -50,7 +50,8 @@ func (s *Server) usage(w http.ResponseWriter, _ *http.Request) {
 		completion += row.CompletionTokens
 		cost += row.CostUSD
 	}
-	days, err := s.Store.UsageDays(14)
+	daysN, _ := strconv.Atoi(r.URL.Query().Get("days"))
+	days, err := s.Store.UsageDays(daysN)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return

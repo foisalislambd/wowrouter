@@ -534,7 +534,7 @@ func (s *Store) refreshFacts() error {
 }
 
 func (s *Store) ListProviders() ([]Provider, error) {
-	page, err := s.ListProvidersPage("", "", 0, 0)
+	page, err := s.ListProvidersPage("", "", 0, 0, "")
 	if err != nil {
 		return nil, err
 	}
@@ -556,7 +556,7 @@ type ProviderPage struct {
 	Offset     int
 }
 
-func (s *Store) ListProvidersPage(query, category string, limit, offset int) (ProviderPage, error) {
+func (s *Store) ListProvidersPage(query, category string, limit, offset int, state string) (ProviderPage, error) {
 	unlimited := limit <= 0
 	if limit < 0 {
 		limit = 24
@@ -585,6 +585,12 @@ func (s *Store) ListProvidersPage(query, category string, limit, offset int) (Pr
 		for _, slug := range slugs {
 			args = append(args, slug)
 		}
+	}
+	switch state {
+	case "ready":
+		where += " AND p.enabled = 1 AND (p.api_key_cipher <> '' OR p.key_optional = 1)"
+	case "setup":
+		where += " AND NOT (p.enabled = 1 AND (p.api_key_cipher <> '' OR p.key_optional = 1))"
 	}
 
 	countArgs := append([]any{}, args...)

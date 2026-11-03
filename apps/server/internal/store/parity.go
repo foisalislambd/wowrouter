@@ -120,9 +120,12 @@ type CatalogModel struct {
 	Active      bool    `json:"active"`
 }
 
-func (s *Store) SearchModels(query, kind string, limit int, priced bool) ([]CatalogModel, error) {
+func (s *Store) SearchModels(query, kind, sort string, limit, offset int, priced bool) ([]CatalogModel, int, error) {
 	if limit <= 0 || limit > 100 {
 		limit = 40
+	}
+	if offset < 0 {
+		offset = 0
 	}
 	where := `WHERE 1 = 1`
 	args := []any{}
@@ -136,16 +139,28 @@ func (s *Store) SearchModels(query, kind string, limit int, priced bool) ([]Cata
 		args = append(args, kind)
 	}
 	order := `ORDER BY display_name`
+	switch sort {
+	case "price":
+		order = `ORDER BY input_usd_per_million DESC, display_name`
+	case "provider":
+		order = `ORDER BY provider_slug, display_name`
+	}
 	if priced {
 		where += ` AND (input_usd_per_million > 0 OR output_usd_per_million > 0)`
-		order = `ORDER BY input_usd_per_million DESC, display_name`
+		if sort == "" {
+			order = `ORDER BY input_usd_per_million DESC, display_name`
+		}
 	}
-	args = append(args, limit)
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM models `+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	args = append(args, limit, offset)
 	rows, err := s.db.Query(`
 SELECT id, provider_slug, upstream_id, display_name, kind, input_usd_per_million, output_usd_per_million, active
-FROM models `+where+` `+order+` LIMIT ?`, args...)
+FROM models `+where+` `+order+` LIMIT ? OFFSET ?`, args...)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer rows.Close()
 	out := []CatalogModel{}
@@ -153,12 +168,12 @@ FROM models `+where+` `+order+` LIMIT ?`, args...)
 		var item CatalogModel
 		var active int
 		if err := rows.Scan(&item.ID, &item.Provider, &item.UpstreamID, &item.DisplayName, &item.Kind, &item.InputUSD, &item.OutputUSD, &active); err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		item.Active = active == 1
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	return out, total, rows.Err()
 }
 
 // FreeProvider is a catalog row marked free.
@@ -679,16 +694,18 @@ func (s *Store) DeleteAgentNote(id string) error {
 
 // ProviderStat groups recent calls by the provider slug in the model id.
 type ProviderStat struct {
-	Provider string `json:"provider"`
-	Requests int    `json:"requests"`
-	Errors   int    `json:"errors"`
+	Provider   string `json:"provider"`
+	Requests   int    `json:"requests"`
+	Errors     int    `json:"errors"`
+	AvgLatency int    `json:"avgLatencyMs"`
 }
 
 func (s *Store) ProviderStats() ([]ProviderStat, error) {
 	rows, err := s.db.Query(`
 SELECT CASE WHEN instr(model_id, '/') > 0 THEN substr(model_id, 1, instr(model_id, '/') - 1) ELSE model_id END,
        COUNT(*),
-       COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0)
+       COALESCE(SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END), 0),
+       COALESCE(AVG(latency_ms), 0)
 FROM request_logs GROUP BY 1 ORDER BY COUNT(*) DESC`)
 	if err != nil {
 		return nil, err
@@ -697,9 +714,11 @@ FROM request_logs GROUP BY 1 ORDER BY COUNT(*) DESC`)
 	out := []ProviderStat{}
 	for rows.Next() {
 		var item ProviderStat
-		if err := rows.Scan(&item.Provider, &item.Requests, &item.Errors); err != nil {
+		var avg float64
+		if err := rows.Scan(&item.Provider, &item.Requests, &item.Errors, &avg); err != nil {
 			return nil, err
 		}
+		item.AvgLatency = int(avg)
 		out = append(out, item)
 	}
 	return out, rows.Err()

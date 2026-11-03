@@ -44,28 +44,28 @@ func TestProviderKeyAndModelRoute(t *testing.T) {
 		t.Fatalf("expected curated openai models, got %d", providers[0].TotalModels)
 	}
 
-	first, err := s.ListProvidersPage("", "", 2, 0)
+	first, err := s.ListProvidersPage("", "", 2, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(first.Providers) != 2 || first.Total < 2 || first.Offset != 0 {
 		t.Fatalf("page total=%d len=%d", first.Total, len(first.Providers))
 	}
-	second, err := s.ListProvidersPage("", "", 2, 2)
+	second, err := s.ListProvidersPage("", "", 2, 2, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(second.Providers) != 2 || second.Providers[0].Slug == first.Providers[0].Slug {
 		t.Fatalf("second page overlapped or was short: %s %s", first.Providers[0].Slug, second.Providers[0].Slug)
 	}
-	found, err := s.ListProvidersPage("official openai chat", "", 24, 0)
+	found, err := s.ListProvidersPage("official openai chat", "", 24, 0, "")
 	if err != nil || found.Total < 1 || found.Providers[0].Slug != "openai" {
 		t.Fatalf("search page = %+v err=%v", found, err)
 	}
 	if len(first.Categories) < 2 || first.Categories[0].ID != "all" || first.Categories[0].Total != first.Total {
 		t.Fatalf("categories = %+v", first.Categories)
 	}
-	frontier, err := s.ListProvidersPage("", "Frontier", 5, 0)
+	frontier, err := s.ListProvidersPage("", "Frontier", 5, 0, "")
 	if err != nil || frontier.Total < 1 || frontier.Providers[0].Category != "Frontier" {
 		t.Fatalf("frontier = %+v err=%v", frontier, err)
 	}
