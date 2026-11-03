@@ -55,6 +55,8 @@ export type RouterKey = {
   prefix: string
   createdAt: string
   lastUsedAt: string | null
+  monthlyBudgetUsd: number | null
+  monthSpendUsd: number
 }
 
 export type CreatedKey = RouterKey & { secret: string }
@@ -69,6 +71,7 @@ export type ActivityItem = {
   promptTokens: number
   completionTokens: number
   errorMessage: string
+  routeNote?: string
 }
 
 export type Overview = {
@@ -91,6 +94,9 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const data = (await response.json().catch(() => ({}))) as { error?: string }
   if (!response.ok) {
+    if (response.status === 401 && data.error === "Sign in to use the panel.") {
+      window.dispatchEvent(new Event("wowrouter-auth"))
+    }
     throw new Error(data.error || response.statusText)
   }
   return data as T
@@ -214,10 +220,10 @@ export function listKeys() {
   return request<{ keys: RouterKey[] }>("/api/keys")
 }
 
-export function createKey(name: string) {
+export function createKey(name: string, monthlyBudgetUsd?: number) {
   return request<CreatedKey>("/api/keys", {
     method: "POST",
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, monthlyBudgetUsd: monthlyBudgetUsd && monthlyBudgetUsd > 0 ? monthlyBudgetUsd : undefined }),
   })
 }
 
@@ -246,11 +252,54 @@ export type UsageRow = {
   costUsd: number
 }
 
+export type UsageDay = {
+  day: string
+  requests: number
+  promptTokens: number
+  completionTokens: number
+  costUsd: number
+}
+
 export function getUsage() {
   return request<{
     rows: UsageRow[]
+    days: UsageDay[]
     totals: { requests: number; errors: number; promptTokens: number; completionTokens: number; costUsd: number }
   }>("/api/usage")
+}
+
+export type PanelSession = {
+  authRequired: boolean
+  authenticated: boolean
+}
+
+export function getSession() {
+  return request<PanelSession>("/api/session")
+}
+
+export function login(password: string) {
+  return request<PanelSession>("/api/session", {
+    method: "POST",
+    body: JSON.stringify({ password }),
+  })
+}
+
+export function savePanelAuth(body: { enabled: boolean; password?: string; currentPassword?: string }) {
+  return request<{ authRequired: boolean; signedOut: boolean }>("/api/settings/auth", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export type ClientSnippet = {
+  id: string
+  name: string
+  summary: string
+  config: string
+}
+
+export function getClients() {
+  return request<{ baseUrl: string; panelUrl: string; clients: ClientSnippet[] }>("/api/clients")
 }
 
 export function getSettings() {
@@ -269,7 +318,9 @@ export type FallbackChain = {
   id: string
   name: string
   modelId: string
+  strategy: string
   models: string[]
+  weights: number[]
   createdAt: string
 }
 
@@ -277,10 +328,10 @@ export function listFallbacks() {
   return request<{ fallbacks: FallbackChain[] }>("/api/fallbacks")
 }
 
-export function saveFallback(name: string, models: string[]) {
+export function saveFallback(name: string, models: string[], strategy: string, weights: number[]) {
   return request<FallbackChain>("/api/fallbacks", {
     method: "POST",
-    body: JSON.stringify({ name, models }),
+    body: JSON.stringify({ name, models, strategy, weights }),
   })
 }
 

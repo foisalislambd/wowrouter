@@ -14,6 +14,7 @@ import (
 )
 
 func (s *Server) proxySpecial(w http.ResponseWriter, r *http.Request, source, keyID string, route store.Route, body []byte, started time.Time, retry bool) bool {
+	stampDecision(w, r, route, 0, 0)
 	var call adapt.SimpleChat
 	var err error
 	switch route.Protocol {

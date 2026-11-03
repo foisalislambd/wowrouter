@@ -1,5 +1,5 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
-import { clearActivity, getDesktop, getSettings, saveDesktop } from "@/lib/api";
+import { clearActivity, getDesktop, getSession, getSettings, saveDesktop, savePanelAuth } from "@/lib/api";
 import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
@@ -10,6 +10,11 @@ export default function SettingsPage() {
   const [startWithWindows, setStartWithWindows] = useState(true);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [authOn, setAuthOn] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
 
   useEffect(() => {
     getSettings()
@@ -25,6 +30,9 @@ export default function SettingsPage() {
         setStartWithWindows(result.startWithWindows);
       })
       .catch((err: Error) => setError(err.message));
+    getSession()
+      .then((result) => setAuthOn(result.authRequired))
+      .catch((err: Error) => setError(err.message));
   }, []);
 
   async function onStartup(next: boolean) {
@@ -35,6 +43,40 @@ export default function SettingsPage() {
     } catch (err) {
       setStartWithWindows(!next);
       setError(err instanceof Error ? err.message : "Could not save the startup setting");
+    }
+  }
+
+  async function onAuth(enabled: boolean) {
+    setError("");
+    setAuthMessage("");
+    if (enabled && password !== confirm) {
+      setError("The two passwords do not match.");
+      return;
+    }
+    if (enabled && password.length < 8) {
+      setError("Use at least 8 characters.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await savePanelAuth({
+        enabled,
+        password: enabled ? password : "",
+        currentPassword,
+      });
+      setAuthOn(result.authRequired);
+      setPassword("");
+      setConfirm("");
+      setCurrentPassword("");
+      if (result.signedOut) {
+        window.dispatchEvent(new Event("wowrouter-auth"));
+        return;
+      }
+      setAuthMessage(result.authRequired ? "Password protection is on." : "Password protection is off.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save the password setting");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -66,6 +108,48 @@ export default function SettingsPage() {
         <div>
           <p className="text-xs tracking-wide text-gray-500 uppercase">Listen address</p>
           <p className="mt-1 font-mono text-sm text-gray-900 dark:text-white">{address || "—"}</p>
+        </div>
+        <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
+          <p className="text-xs tracking-wide text-gray-500 uppercase">Panel password</p>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+            Off by default, so this computer can open the panel with no login. Turn it on before the router is reachable from another machine, such as a VPS or a published Docker port. Router keys for Cursor stay separate.
+          </p>
+          {authMessage && <p className="mt-2 text-sm text-success-600">{authMessage}</p>}
+          <div className="mt-3 grid gap-2 sm:max-w-sm">
+            {authOn && (
+              <input
+                type="password"
+                value={currentPassword}
+                onChange={(event) => setCurrentPassword(event.target.value)}
+                placeholder="Current password"
+                className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white"
+              />
+            )}
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder={authOn ? "New password" : "Password"}
+              className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white"
+            />
+            <input
+              type="password"
+              value={confirm}
+              onChange={(event) => setConfirm(event.target.value)}
+              placeholder="Confirm password"
+              className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white"
+            />
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => onAuth(true)} disabled={busy} className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60">
+                {authOn ? "Change password" : "Turn on password"}
+              </button>
+              {authOn && (
+                <button type="button" onClick={() => onAuth(false)} disabled={busy} className="rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                  Turn off
+                </button>
+              )}
+            </div>
+          </div>
         </div>
         <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
           <p className="text-xs tracking-wide text-gray-500 uppercase">Background</p>

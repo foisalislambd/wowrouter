@@ -15,7 +15,7 @@ docker run -d --name wowrouter \
 
 `foisalislambd/airoute:latest` is the same image. Open `http://127.0.0.1:8787`. Point Cursor at `http://127.0.0.1:8787/v1`.
 
-`127.0.0.1:8787:8787` means only this computer can open the panel. Inside the container the server listens on all interfaces, which is what Docker needs in order to publish the port. Do not publish it as `8787:8787` unless you want every machine on your network to reach the panel. The panel has no login.
+`127.0.0.1:8787:8787` means only this computer can open the panel. Inside the container the server listens on all interfaces, which is what Docker needs in order to publish the port. Do not publish it as `8787:8787` unless you want other machines to reach the panel. If you do, turn on the panel password in **Settings** first. It is off by default.
 
 From the repo, Compose builds the local source and names that image `wowrouter:local`. It does not pull the published `latest` tag. The Compose volume is `wowrouter`.
 

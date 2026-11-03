@@ -6,6 +6,7 @@ import { useEffect, useState, type FormEvent } from "react";
 export default function KeysPage() {
   const [keys, setKeys] = useState<RouterKey[]>([]);
   const [name, setName] = useState("");
+  const [budget, setBudget] = useState("");
   const [created, setCreated] = useState<CreatedKey | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
@@ -20,9 +21,15 @@ export default function KeysPage() {
     event.preventDefault();
     setError("");
     try {
-      const next = await createKey(name.trim());
+      const monthly = budget.trim() === "" ? undefined : Number(budget);
+      if (monthly !== undefined && (!Number.isFinite(monthly) || monthly <= 0)) {
+        setError("Monthly budget must be greater than zero, or leave it empty.");
+        return;
+      }
+      const next = await createKey(name.trim(), monthly);
       setCreated(next);
       setName("");
+      setBudget("");
       setKeys((current) => [next, ...current]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create key");
@@ -74,6 +81,13 @@ export default function KeysPage() {
           placeholder="Key name, for example Cursor"
           className="h-10 flex-1 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white"
         />
+        <input
+          value={budget}
+          onChange={(event) => setBudget(event.target.value)}
+          inputMode="decimal"
+          placeholder="Monthly USD cap, optional"
+          className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 sm:w-56 dark:border-gray-700 dark:bg-white/5 dark:text-white"
+        />
         <button type="submit" className="rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600">
           Create key
         </button>
@@ -89,6 +103,11 @@ export default function KeysPage() {
                 <div>
                   <p className="text-sm font-medium text-gray-900 dark:text-white">{item.name}</p>
                   <p className="font-mono text-xs text-gray-500">{item.prefix}</p>
+                  <p className="text-xs text-gray-500">
+                    {item.monthlyBudgetUsd
+                      ? `$${item.monthSpendUsd.toFixed(4)} of $${item.monthlyBudgetUsd.toFixed(2)} this month`
+                      : `$${item.monthSpendUsd.toFixed(4)} this month · no cap`}
+                  </p>
                 </div>
                 <button type="button" onClick={() => onDelete(item.id)} className="text-sm font-medium text-error-500 hover:underline">
                   Revoke

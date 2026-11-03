@@ -226,6 +226,7 @@ func (s *Server) callMedia(r *http.Request, route store.Route, prompt, size, ima
 }
 
 func (s *Server) proxyNativeChat(w http.ResponseWriter, r *http.Request, source, keyID string, route store.Route, body []byte, started time.Time, retry bool) bool {
+	stampDecision(w, r, route, 0, 0)
 	var meta struct {
 		Stream bool `json:"stream"`
 	}
@@ -309,7 +310,8 @@ func (s *Server) proxyNativeChat(w http.ResponseWriter, r *http.Request, source,
 		text, prompt, completion = adapt.TextFromAnthropic(payload)
 	}
 	s.noteAccount(route)
-	_ = s.Store.AddLog(store.LogInput{
+	stampDecision(w, r, route, prompt, completion)
+	_ = s.addRouteLog(r, store.LogInput{
 		Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 		StatusCode: resp.StatusCode, LatencyMS: int(time.Since(started).Milliseconds()),
 		PromptTokens: prompt, CompletionTokens: completion, Request: string(request),

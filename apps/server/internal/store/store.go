@@ -29,15 +29,15 @@ type Store struct {
 }
 
 type Provider struct {
-	Slug         string `json:"slug"`
-	DisplayName  string `json:"displayName"`
-	Protocol     string `json:"protocol"`
-	BaseURL      string `json:"baseUrl"`
-	DocsURL      string `json:"docsUrl"`
-	Summary      string `json:"summary"`
-	Category     string `json:"category"`
-	Free         bool   `json:"free"`
-	KeyOptional  bool   `json:"keyOptional"`
+	Slug            string `json:"slug"`
+	DisplayName     string `json:"displayName"`
+	Protocol        string `json:"protocol"`
+	BaseURL         string `json:"baseUrl"`
+	DocsURL         string `json:"docsUrl"`
+	Summary         string `json:"summary"`
+	Category        string `json:"category"`
+	Free            bool   `json:"free"`
+	KeyOptional     bool   `json:"keyOptional"`
 	HasAPIKey       bool   `json:"hasApiKey"`
 	APIKeyHint      string `json:"apiKeyHint"`
 	Enabled         bool   `json:"enabled"`
@@ -67,9 +67,9 @@ type Model struct {
 }
 
 type Route struct {
-	Model      Model
-	Protocol   string
-	BaseURL    string
+	Model       Model
+	Protocol    string
+	BaseURL     string
 	APIKey      string
 	AccountID   string
 	AccountName string
@@ -77,11 +77,13 @@ type Route struct {
 }
 
 type RouterKey struct {
-	ID         string  `json:"id"`
-	Name       string  `json:"name"`
-	Prefix     string  `json:"prefix"`
-	CreatedAt  string  `json:"createdAt"`
-	LastUsedAt *string `json:"lastUsedAt"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Prefix           string   `json:"prefix"`
+	CreatedAt        string   `json:"createdAt"`
+	LastUsedAt       *string  `json:"lastUsedAt"`
+	MonthlyBudgetUSD *float64 `json:"monthlyBudgetUsd"`
+	MonthSpendUSD    float64  `json:"monthSpendUsd"`
 }
 
 type CreatedKey struct {
@@ -100,6 +102,7 @@ type RequestLog struct {
 	CompletionTokens int    `json:"completionTokens"`
 	ErrorMessage     string `json:"errorMessage"`
 	RequestJSON      string `json:"requestJson,omitempty"`
+	RouteNote        string `json:"routeNote,omitempty"`
 }
 
 type LogInput struct {
@@ -112,6 +115,7 @@ type LogInput struct {
 	CompletionTokens int
 	ErrorMessage     string
 	Request          string
+	RouteNote        string
 }
 
 type UsageRow struct {
@@ -127,7 +131,9 @@ type Fallback struct {
 	ID        string   `json:"id"`
 	Name      string   `json:"name"`
 	ModelID   string   `json:"modelId"`
+	Strategy  string   `json:"strategy"`
 	Models    []string `json:"models"`
+	Weights   []int    `json:"weights"`
 	CreatedAt string   `json:"createdAt"`
 }
 
@@ -277,6 +283,27 @@ CREATE TABLE IF NOT EXISTS provider_accounts (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_provider_accounts_slug ON provider_accounts(provider_slug, priority, created_at);`); err != nil {
+		return err
+	}
+	for _, alter := range []string{
+		`ALTER TABLE request_logs ADD COLUMN route_note TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE fallbacks ADD COLUMN strategy TEXT NOT NULL DEFAULT 'priority'`,
+		`ALTER TABLE fallback_steps ADD COLUMN weight INTEGER NOT NULL DEFAULT 1`,
+		`ALTER TABLE router_keys ADD COLUMN monthly_budget_usd REAL`,
+	} {
+		if _, err = s.db.Exec(alter); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	if _, err = s.db.Exec(`
+CREATE TABLE IF NOT EXISTS app_settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS panel_sessions (
+  token_hash TEXT PRIMARY KEY,
+  expires_at TEXT NOT NULL
+);`); err != nil {
 		return err
 	}
 	return s.importLegacyAccounts()
@@ -1025,9 +1052,16 @@ WHERE m.upstream_id = ?`, modelRef)
 }
 
 func (s *Store) CreateRouterKey(name string) (CreatedKey, error) {
+	return s.CreateRouterKeyBudget(name, nil)
+}
+
+func (s *Store) CreateRouterKeyBudget(name string, monthlyUSD *float64) (CreatedKey, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "Default"
+	}
+	if monthlyUSD != nil && *monthlyUSD <= 0 {
+		return CreatedKey{}, errString("monthly budget must be greater than zero")
 	}
 	raw := make([]byte, 32)
 	idRaw := make([]byte, 8)
@@ -1041,19 +1075,33 @@ func (s *Store) CreateRouterKey(name string) (CreatedKey, error) {
 	id := hex.EncodeToString(idRaw)
 	now := time.Now().UTC().Format(time.RFC3339)
 	prefix := secretValue[:16] + "…"
-	_, err := s.db.Exec(`INSERT INTO router_keys (id, name, key_hash, key_prefix, created_at) VALUES (?, ?, ?, ?, ?)`,
-		id, name, hashKey(secretValue), prefix, now)
+	var budget any
+	if monthlyUSD != nil {
+		budget = *monthlyUSD
+	}
+	_, err := s.db.Exec(`INSERT INTO router_keys (id, name, key_hash, key_prefix, created_at, monthly_budget_usd) VALUES (?, ?, ?, ?, ?, ?)`,
+		id, name, hashKey(secretValue), prefix, now, budget)
 	if err != nil {
 		return CreatedKey{}, err
 	}
-	return CreatedKey{
-		RouterKey: RouterKey{ID: id, Name: name, Prefix: prefix, CreatedAt: now},
+	created := CreatedKey{
+		RouterKey: RouterKey{ID: id, Name: name, Prefix: prefix, CreatedAt: now, MonthlyBudgetUSD: monthlyUSD},
 		Secret:    secretValue,
-	}, nil
+	}
+	return created, nil
 }
 
 func (s *Store) ListRouterKeys() ([]RouterKey, error) {
-	rows, err := s.db.Query(`SELECT id, name, key_prefix, created_at, last_used_at FROM router_keys ORDER BY created_at DESC`)
+	rows, err := s.db.Query(`
+SELECT k.id, k.name, k.key_prefix, k.created_at, k.last_used_at, k.monthly_budget_usd,
+       COALESCE((
+         SELECT SUM((l.prompt_tokens * COALESCE(m.input_usd_per_million, 0) + l.completion_tokens * COALESCE(m.output_usd_per_million, 0)) / 1000000.0)
+         FROM request_logs l
+         LEFT JOIN models m ON m.id = l.model_id
+         WHERE l.router_key_id = k.id AND l.status_code < 400 AND l.created_at >= ?
+       ), 0)
+FROM router_keys k
+ORDER BY k.created_at DESC`, monthStartUTC(time.Now()))
 	if err != nil {
 		return nil, err
 	}
@@ -1062,11 +1110,16 @@ func (s *Store) ListRouterKeys() ([]RouterKey, error) {
 	for rows.Next() {
 		var item RouterKey
 		var last sql.NullString
-		if err := rows.Scan(&item.ID, &item.Name, &item.Prefix, &item.CreatedAt, &last); err != nil {
+		var budget sql.NullFloat64
+		if err := rows.Scan(&item.ID, &item.Name, &item.Prefix, &item.CreatedAt, &last, &budget, &item.MonthSpendUSD); err != nil {
 			return nil, err
 		}
 		if last.Valid {
 			item.LastUsedAt = &last.String
+		}
+		if budget.Valid {
+			value := budget.Float64
+			item.MonthlyBudgetUSD = &value
 		}
 		out = append(out, item)
 	}
@@ -1116,10 +1169,10 @@ func (s *Store) AddLog(input LogInput) error {
 	_, err := s.db.Exec(`
 INSERT INTO request_logs (
   created_at, source, router_key_id, model_id, status_code, latency_ms,
-  prompt_tokens, completion_tokens, error_message, request_json
-) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?)`,
+  prompt_tokens, completion_tokens, error_message, request_json, route_note
+) VALUES (?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, ?, ?)`,
 		time.Now().UTC().Format(time.RFC3339), input.Source, input.RouterKeyID, input.ModelID,
-		input.StatusCode, input.LatencyMS, input.PromptTokens, input.CompletionTokens, clipText(input.ErrorMessage, 2000), clipText(input.Request, 100000))
+		input.StatusCode, input.LatencyMS, input.PromptTokens, input.CompletionTokens, clipText(input.ErrorMessage, 2000), clipText(input.Request, 100000), clipText(input.RouteNote, 300))
 	if err != nil {
 		return err
 	}
@@ -1143,7 +1196,7 @@ func (s *Store) ListLogs(limit int) ([]RequestLog, error) {
 		limit = 50
 	}
 	rows, err := s.db.Query(`
-SELECT id, created_at, source, model_id, status_code, latency_ms, prompt_tokens, completion_tokens, error_message
+SELECT id, created_at, source, model_id, status_code, latency_ms, prompt_tokens, completion_tokens, error_message, route_note
 FROM request_logs ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -1152,7 +1205,7 @@ FROM request_logs ORDER BY id DESC LIMIT ?`, limit)
 	var out []RequestLog
 	for rows.Next() {
 		var item RequestLog
-		if err := rows.Scan(&item.ID, &item.CreatedAt, &item.Source, &item.ModelID, &item.StatusCode, &item.LatencyMS, &item.PromptTokens, &item.CompletionTokens, &item.ErrorMessage); err != nil {
+		if err := rows.Scan(&item.ID, &item.CreatedAt, &item.Source, &item.ModelID, &item.StatusCode, &item.LatencyMS, &item.PromptTokens, &item.CompletionTokens, &item.ErrorMessage, &item.RouteNote); err != nil {
 			return nil, err
 		}
 		out = append(out, item)

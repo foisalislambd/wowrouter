@@ -62,6 +62,7 @@ export default function OverviewPage() {
             <li>1. Open a provider and save its API key.</li>
             <li>2. Turn on the models you want this router to expose.</li>
             <li>3. Create a router key and use it as the OpenAI API key in your app.</li>
+            <li>4. Set the model to <span className="font-mono text-xs">auto</span>, or open Routing to build a combo.</li>
           </ol>
           <div className="mt-5 flex flex-wrap gap-2">
             <Link to="/providers" className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600">
@@ -69,6 +70,9 @@ export default function OverviewPage() {
             </Link>
             <Link to="/keys" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
               API keys
+            </Link>
+            <Link to="/clients" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
+              Clients
             </Link>
           </div>
         </section>

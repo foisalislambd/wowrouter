@@ -44,7 +44,10 @@ export default function ActivityPage() {
                       </Link>
                     </td>
                     <td className="px-4 py-3">{item.source}</td>
-                    <td className="px-4 py-3 font-mono text-xs">{item.modelId || "—"}</td>
+                    <td className="px-4 py-3 font-mono text-xs">
+                      {item.modelId || "—"}
+                      {item.routeNote && <span className="mt-1 block text-[11px] text-gray-500">{item.routeNote}</span>}
+                    </td>
                     <td className={`px-4 py-3 ${item.statusCode >= 400 ? "text-error-500" : "text-success-600"}`}>
                       {item.statusCode}
                       {item.errorMessage && <span className="mt-1 block max-w-xs text-xs text-gray-500">{item.errorMessage}</span>}

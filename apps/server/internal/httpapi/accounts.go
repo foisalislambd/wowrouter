@@ -134,8 +134,8 @@ func (s *Server) tryChatRoutes(w http.ResponseWriter, r *http.Request, source, k
 			})
 			continue
 		}
-		if multiModel && (route.Protocol != catalog.ProtocolOpenAIChat || (route.Model.Kind != "" && route.Model.Kind != catalog.KindChat)) {
-			lastMessage = route.Model.ID + " cannot be used in a fallback. Fallback steps are OpenAI-compatible chat models."
+		if multiModel && !comboChat(route) {
+			lastMessage = route.Model.ID + " cannot be used in a combo. Combo steps are chat models."
 			_ = s.Store.AddLog(store.LogInput{
 				Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 				StatusCode: http.StatusBadRequest, ErrorMessage: lastMessage,
@@ -179,6 +179,18 @@ func (s *Server) tryChatRoutes(w http.ResponseWriter, r *http.Request, source, k
 		return
 	}
 	writeOpenAIError(w, http.StatusBadGateway, lastMessage, "server_error", "upstream_error")
+}
+
+func comboChat(route store.Route) bool {
+	if route.Model.Kind != "" && route.Model.Kind != catalog.KindChat {
+		return false
+	}
+	switch route.Protocol {
+	case catalog.ProtocolOpenAIChat, catalog.ProtocolAnthropic, catalog.ProtocolGemini, catalog.ProtocolOllama, catalog.ProtocolCohere:
+		return true
+	default:
+		return false
+	}
 }
 
 func accountNote(route store.Route, message string) string {

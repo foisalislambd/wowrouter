@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"airoute/server/internal/catalog"
 	"airoute/server/internal/store"
 )
 
@@ -22,8 +21,8 @@ func (s *Server) proxyFallback(w http.ResponseWriter, r *http.Request, source, k
 			})
 			continue
 		}
-		if strings.TrimSpace(route.BaseURL) == "" || route.Protocol != catalog.ProtocolOpenAIChat || (route.Model.Kind != "" && route.Model.Kind != catalog.KindChat) {
-			lastMessage = route.Model.ID + " cannot be used in a fallback. Fallback steps are OpenAI-compatible chat models."
+		if strings.TrimSpace(route.BaseURL) == "" || !comboChat(route) {
+			lastMessage = route.Model.ID + " cannot be used in a combo. Combo steps are chat models."
 			_ = s.Store.AddLog(store.LogInput{
 				Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,
 				StatusCode: http.StatusBadRequest, LatencyMS: int(time.Since(started).Milliseconds()), ErrorMessage: lastMessage,

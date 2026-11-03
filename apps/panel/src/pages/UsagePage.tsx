@@ -1,5 +1,5 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
-import { getUsage, type UsageRow } from "@/lib/api";
+import { getUsage, type UsageDay, type UsageRow } from "@/lib/api";
 import { useEffect, useState } from "react";
 
 function money(value: number) {
@@ -8,6 +8,7 @@ function money(value: number) {
 
 export default function UsagePage() {
   const [rows, setRows] = useState<UsageRow[]>([]);
+  const [days, setDays] = useState<UsageDay[]>([]);
   const [totals, setTotals] = useState({ requests: 0, errors: 0, promptTokens: 0, completionTokens: 0, costUsd: 0 });
   const [error, setError] = useState("");
 
@@ -15,6 +16,7 @@ export default function UsagePage() {
     getUsage()
       .then((result) => {
         setRows(result.rows);
+        setDays(result.days ?? []);
         setTotals(result.totals);
       })
       .catch((err: Error) => setError(err.message));
@@ -39,6 +41,21 @@ export default function UsagePage() {
           </div>
         ))}
       </div>
+      {days.length > 0 && (
+        <div className="panel-card panel-card-body mb-4">
+          <p className="text-xs tracking-wide text-gray-500 uppercase">Last 14 days</p>
+          <div className="mt-3 flex h-24 items-end gap-1">
+            {days.map((day) => {
+              const peak = Math.max(...days.map((item) => item.requests), 1);
+              return (
+                <div key={day.day} className="flex h-full flex-1 flex-col justify-end" title={`${day.day}: ${day.requests} requests, ${money(day.costUsd)}`}>
+                  <div className="rounded-sm bg-brand-500/80" style={{ height: `${Math.max(4, (day.requests / peak) * 100)}%` }} />
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
       <div className="panel-card overflow-hidden">
         {rows.length === 0 ? (
           <p className="p-4 text-sm text-gray-500">No requests yet.</p>

@@ -14,7 +14,7 @@ Cursor talks to WowRouter the same way it talks to OpenAI. You change two settin
 | --- | --- |
 | Base URL | `http://127.0.0.1:8787/v1` |
 | API key | the `sk-airoute-` key from the panel |
-| Model | a public id such as `openai/gpt-4o-mini` |
+| Model | `auto`, or a public id such as `openai/gpt-4o-mini` |
 
 The base URL includes `/v1`. Cursor adds `/chat/completions` itself. If you paste only `http://127.0.0.1:8787`, chat calls miss the router.
 
@@ -26,7 +26,9 @@ A model id is `provider/model`.
 
 | You want | Model id to type |
 | --- | --- |
+| WowRouter to choose | `auto`, `auto/coding`, `auto/fast`, or `auto/cheap` |
 | OpenAI's GPT-4o mini | `openai/gpt-4o-mini` |
+| A saved combo | `fallback/the-name` from the Routing page |
 | A model from another provider | that provider's slug, a slash, then the upstream id shown in the panel |
 
 The slug is the name in the provider's address, such as `/providers/openai`. The panel shows the upstream id on the model row.
