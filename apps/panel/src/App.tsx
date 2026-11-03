@@ -1,4 +1,5 @@
 import { ThemeProvider } from "@/components/theme/theme-provider";
+import { ToastProvider } from "@/components/ui/feedback";
 import { PanelShell } from "@/components/layout/panel-shell";
 import { SidebarProvider } from "@/context/sidebar-context";
 import { getSession } from "@/lib/api";
@@ -27,11 +28,9 @@ import {
   LimitsPage,
   MediaPage,
   ModelsPage,
-  OnboardingPage,
   PricingPage,
   ProxyPage,
   QuotaPage,
-  SearchPage,
   ServicesPage,
   SkillsPage,
   TeamsPage,
@@ -49,6 +48,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 export default function App() {
   return (
     <ThemeProvider>
+      <ToastProvider>
       <BrowserRouter>
         <AuthGate>
           <SidebarProvider>
@@ -71,7 +71,7 @@ export default function App() {
                 <Route path="/quota" element={<QuotaPage />} />
                 <Route path="/endpoints" element={<EndpointsPage />} />
                 <Route path="/translator" element={<TranslatorPage />} />
-                <Route path="/onboarding" element={<OnboardingPage />} />
+                <Route path="/onboarding" element={<Navigate to="/" replace />} />
                 <Route path="/status" element={<HealthPage />} />
                 <Route path="/status/chaos" element={<ChaosPage />} />
                 <Route path="/status/proxy" element={<ProxyPage />} />
@@ -86,7 +86,7 @@ export default function App() {
                 <Route path="/cache" element={<CachePage />} />
                 <Route path="/compression" element={<CompressionPage />} />
                 <Route path="/audit" element={<AuditPage />} />
-                <Route path="/search" element={<SearchPage />} />
+                <Route path="/search" element={<Navigate to="/models?kind=search" replace />} />
                 <Route path="/media" element={<MediaPage />} />
                 <Route path="/skills" element={<SkillsPage />} />
                 <Route path="/evals" element={<EvalsPage />} />
@@ -99,6 +99,7 @@ export default function App() {
           </SidebarProvider>
         </AuthGate>
       </BrowserRouter>
+      </ToastProvider>
     </ThemeProvider>
   );
 }

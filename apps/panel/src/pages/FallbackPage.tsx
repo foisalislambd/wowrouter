@@ -1,4 +1,6 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
+import { DangerButton, EmptyState, useToast } from "@/components/ui/feedback";
+import { PageTabs, routeTabs } from "@/components/ui/page-tabs";
 import { deleteFallback, listActiveModels, listFallbacks, saveFallback, type FallbackChain, type Model } from "@/lib/api";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 
@@ -32,6 +34,7 @@ export default function FallbackPage() {
   const [query, setQuery] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     listFallbacks()
@@ -70,6 +73,7 @@ export default function FallbackPage() {
       setPicked([]);
       setWeights({});
       setQuery("");
+      toast("Combo saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save combo");
     } finally {
@@ -79,17 +83,20 @@ export default function FallbackPage() {
 
   async function onDelete(id: string) {
     setError("");
-    try {
-      await deleteFallback(id);
-      setChains((current) => current.filter((item) => item.id !== id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not delete combo");
-    }
+    await deleteFallback(id);
+    setChains((current) => current.filter((item) => item.id !== id));
+  }
+
+  async function onDuplicate(chain: FallbackChain) {
+    const saved = await saveFallback(`${chain.name} copy`, chain.models, chain.strategy, chain.weights?.length ? chain.weights : chain.models.map(() => 1));
+    setChains((current) => [saved, ...current]);
+    toast("Combo duplicated");
   }
 
   return (
     <div>
-      <PanelPageHeader title="Routing" />
+      <PanelPageHeader title="Routing" description="Auto picks a model. A combo is a named list your client calls as one model id." />
+      <PageTabs tabs={routeTabs} />
       {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
       <section className="panel-card panel-card-body mb-4">
         <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Auto</h2>
@@ -183,7 +190,7 @@ export default function FallbackPage() {
       </form>
       <div className="panel-card overflow-hidden">
         {chains.length === 0 ? (
-          <p className="p-4 text-sm text-gray-500">No combos yet. Auto still works without one.</p>
+          <EmptyState title="No combos yet" body="Auto still works without one. Add two or more active chat models to build a fallback list." />
         ) : (
           <ul>
             {chains.map((chain) => (
@@ -193,9 +200,10 @@ export default function FallbackPage() {
                   <p className="mt-1 font-mono text-xs text-brand-500">{chain.modelId}</p>
                   <p className="mt-1 text-xs text-gray-500">{labelFor(chain.strategy)} · {chain.models.join(" → ")}</p>
                 </div>
-                <button type="button" onClick={() => onDelete(chain.id)} className="text-sm text-error-500">
-                  Delete
-                </button>
+                <div className="flex gap-3">
+                  <button type="button" className="text-sm text-brand-600" onClick={() => onDuplicate(chain).catch((err: Error) => setError(err.message))}>Duplicate</button>
+                  <DangerButton label="Delete" title={`Delete ${chain.name}?`} body="Clients using this combo id fall back to a missing model." onConfirm={() => onDelete(chain.id)} />
+                </div>
               </li>
             ))}
           </ul>

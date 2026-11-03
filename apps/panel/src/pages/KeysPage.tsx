@@ -1,4 +1,6 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
+import { DangerButton, EmptyState, ErrorNote, useToast } from "@/components/ui/feedback";
+import { keyTabs, PageTabs } from "@/components/ui/page-tabs";
 import { createKey, deleteKey, listKeys, type CreatedKey, type RouterKey } from "@/lib/api";
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState, type FormEvent } from "react";
@@ -10,6 +12,7 @@ export default function KeysPage() {
   const [created, setCreated] = useState<CreatedKey | null>(null);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState("");
+  const toast = useToast();
 
   useEffect(() => {
     listKeys()
@@ -31,6 +34,7 @@ export default function KeysPage() {
       setName("");
       setBudget("");
       setKeys((current) => [next, ...current]);
+      toast("Router key created. Copy it now.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create key");
     }
@@ -38,12 +42,8 @@ export default function KeysPage() {
 
   async function onDelete(id: string) {
     setError("");
-    try {
-      await deleteKey(id);
-      setKeys((current) => current.filter((item) => item.id !== id));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not revoke key");
-    }
+    await deleteKey(id);
+    setKeys((current) => current.filter((item) => item.id !== id));
   }
 
   async function copySecret() {
@@ -57,8 +57,10 @@ export default function KeysPage() {
     <div>
       <PanelPageHeader
         title="API keys"
+        description="One sk-airoute- key for Cursor, Claude Code, and other clients. The secret is shown only once."
       />
-      {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
+      <PageTabs tabs={keyTabs} />
+      <ErrorNote>{error}</ErrorNote>
       {created && (
         <div className="panel-card mb-4 border-brand-200 bg-brand-50 p-4 dark:border-brand-500/30 dark:bg-brand-500/10">
           <p className="text-sm font-medium text-gray-900 dark:text-white">Copy this key now. It will not be shown again.</p>
@@ -95,7 +97,7 @@ export default function KeysPage() {
 
       <div className="panel-card mt-4 overflow-hidden">
         {keys.length === 0 ? (
-          <p className="p-4 text-sm text-gray-500">No router keys yet.</p>
+          <EmptyState title="No router keys yet" body="Create a key and paste it as the OpenAI API key in your coding agent. Leave the base URL as the endpoint on Overview." />
         ) : (
           <ul>
             {keys.map((item) => (
@@ -109,9 +111,7 @@ export default function KeysPage() {
                       : `$${item.monthSpendUsd.toFixed(4)} this month · no cap`}
                   </p>
                 </div>
-                <button type="button" onClick={() => onDelete(item.id)} className="text-sm font-medium text-error-500 hover:underline">
-                  Revoke
-                </button>
+                <DangerButton label="Revoke" title={`Revoke ${item.name}?`} body="Clients using this key stop working. This does not delete the provider key." onConfirm={() => onDelete(item.id)} />
               </li>
             ))}
           </ul>

@@ -81,6 +81,21 @@ export type Overview = {
   endpoint: string
 }
 
+export type DashboardStep = { id: string; label: string; href: string; done: boolean }
+
+export type Dashboard = {
+  providers: number
+  enabledProviders: number
+  activeModels: number
+  routerKeys: number
+  endpoint: string
+  today: { requests: number; errors: number; avgLatencyMs: number; costUsd: number }
+  days: UsageDay[]
+  topModels: UsageRow[]
+  providerHealth: { provider: string; requests: number; errors: number; avgLatencyMs: number }[]
+  steps: DashboardStep[]
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -106,6 +121,14 @@ export function getOverview() {
   return request<Overview>("/api/overview")
 }
 
+export function getDashboard() {
+  return request<Dashboard>("/api/dashboard")
+}
+
+export function providerHealth(slug: string) {
+  return request<{ requests: number; errors: number; avgLatencyMs: number }>(`/api/providers/${slug}/health`)
+}
+
 export type ProviderCategory = {
   id: string
   label: string
@@ -121,10 +144,11 @@ export type ProviderPage = {
   offset: number
 }
 
-export function listProviders(params?: { q?: string; category?: string; limit?: number; offset?: number }) {
+export function listProviders(params?: { q?: string; category?: string; state?: string; limit?: number; offset?: number }) {
   const search = new URLSearchParams()
   if (params?.q) search.set("q", params.q)
   if (params?.category && params.category !== "all") search.set("category", params.category)
+  if (params?.state && params.state !== "all") search.set("state", params.state)
   if (params?.limit) search.set("limit", String(params.limit))
   if (params?.offset) search.set("offset", String(params.offset))
   const query = search.toString()
@@ -245,8 +269,14 @@ export function deleteKey(id: string) {
   return request<void>(`/api/keys/${id}`, { method: "DELETE" })
 }
 
-export function listActivity() {
-  return request<{ activity: ActivityItem[] }>("/api/activity")
+export function listActivity(params?: { q?: string; status?: string; limit?: number; offset?: number }) {
+  const search = new URLSearchParams()
+  if (params?.q) search.set("q", params.q)
+  if (params?.status && params.status !== "all") search.set("status", params.status)
+  if (params?.limit) search.set("limit", String(params.limit))
+  if (params?.offset) search.set("offset", String(params.offset))
+  const query = search.toString()
+  return request<{ activity: ActivityItem[]; total: number }>(`/api/activity${query ? `?${query}` : ""}`)
 }
 
 export function getActivity(id: string) {
@@ -274,12 +304,12 @@ export type UsageDay = {
   costUsd: number
 }
 
-export function getUsage() {
+export function getUsage(days = 14) {
   return request<{
     rows: UsageRow[]
     days: UsageDay[]
     totals: { requests: number; errors: number; promptTokens: number; completionTokens: number; costUsd: number }
-  }>("/api/usage")
+  }>(`/api/usage?days=${days}`)
 }
 
 export type PanelSession = {
@@ -421,14 +451,16 @@ export function deleteFallback(id: string) {
   return request<void>(`/api/fallbacks/${id}`, { method: "DELETE" })
 }
 
-export function catalogModels(params?: { q?: string; kind?: string; limit?: number; priced?: boolean }) {
+export function catalogModels(params?: { q?: string; kind?: string; sort?: string; limit?: number; offset?: number; priced?: boolean }) {
   const search = new URLSearchParams()
   if (params?.q) search.set("q", params.q)
   if (params?.kind) search.set("kind", params.kind)
+  if (params?.sort) search.set("sort", params.sort)
   if (params?.limit) search.set("limit", String(params.limit))
+  if (params?.offset) search.set("offset", String(params.offset))
   if (params?.priced) search.set("priced", "1")
   const query = search.toString()
-  return request<{ models: CatalogModel[] }>(`/api/catalog/models${query ? `?${query}` : ""}`)
+  return request<{ models: CatalogModel[]; total: number }>(`/api/catalog/models${query ? `?${query}` : ""}`)
 }
 
 export type CatalogModel = {

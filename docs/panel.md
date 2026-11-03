@@ -6,20 +6,23 @@ The panel is the web page at `http://127.0.0.1:8787`. You use it to manage provi
 
 | Page | What you do there |
 | --- | --- |
-| Overview | See that the router is up, and how many keys and calls you have |
-| Providers | Save a provider key, set a base URL, and turn models on |
-| Routing | Use `auto`, or save a combo that tries the next model when one fails |
-| Clients | Copy a sample config, or write Claude Code, OpenCode, and Codex config on this computer after you confirm |
-| API keys | Create the key Cursor will use. A monthly dollar cap is optional |
-| Playground | Try a prompt, an image, or a decision before you wire up a tool |
-| Activity | Read one call at a time, including the request that was sent |
-| Usage | See calls grouped by model |
-| Memory | Notes that chat calls can include when memory is on |
-| Models, Quota, Endpoints | Search the catalog, read saved rate limits, and copy the local routes |
-| Costs, Health, Audit | Spend, process health, and MCP or A2A call history |
-| Webhooks, Batches, Limits, Cache, Compression | Outbound hooks, batch files, a per-minute cap, the response cache, and local prompt rewrites |
-| Agents, Skills, Evals, Services | Cloud-agent notes, saved instructions, prompt checks, and bookmarks |
-| Settings | Data folder, listen address, optional password or OIDC, sidebar visibility, and the cache, compression, and memory toggles. On Windows, start with Windows |
+| Overview | Today's requests and cost, provider health, setup steps, and the endpoint to copy |
+| Providers | Search, filter ready providers, test a connection, and turn models on |
+| Models | Search, filter, and sort the catalog |
+| Routing | `auto` and combos. Quota is a tab |
+| Endpoints | Local routes. The translator is a tab |
+| Clients | Copy a sample config, or write Claude Code, OpenCode, and Codex config after you confirm |
+| API keys | The key a coding agent uses. The per-minute cap is a tab. A monthly dollar cap is optional |
+| Playground and Media | Try a prompt or an image before you wire up a tool |
+| Evals and Agents | Prompt checks, agent notes, and skills |
+| Activity | Search stored calls. Audit is a tab |
+| Usage and Costs | Charts, catalog prices, free tiers, and team caps |
+| Health | Process status. Chaos, the outbound proxy, and the console are tabs |
+| Local | Memory, cache, and compression. Each stays off until Settings turns it on |
+| Webhooks, Batches, Services | Signed hooks, small batch jobs, and bookmarks that open directly |
+| Settings | Data folder, optional password or OIDC, sidebar visibility, and helper toggles. The password stays off until you turn it on |
+
+Each page, and why a control is there, is in `docs/panel-pages.md`.
 
 ## A normal first visit
 

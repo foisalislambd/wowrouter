@@ -1,4 +1,5 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
+import { useToast } from "@/components/ui/feedback";
 import { ModalityFlow } from "@/components/modalities";
 import { ProviderMark } from "@/components/provider-mark";
 import {
@@ -14,6 +15,7 @@ import {
   setModelActive,
   startDeviceLogin,
   testProvider,
+  providerHealth,
   updateAccount,
   updateProvider,
   type Model,
@@ -29,7 +31,9 @@ const MODEL_PAGE = 24;
 
 export default function ProviderPage() {
   const { slug = "" } = useParams();
+  const toast = useToast();
   const [provider, setProvider] = useState<Provider | null>(null);
+  const [health, setHealth] = useState<{ requests: number; errors: number; avgLatencyMs: number } | null>(null);
   const [models, setModels] = useState<Model[]>([]);
   const [modelTotal, setModelTotal] = useState(0);
   const [modelsLoading, setModelsLoading] = useState(true);
@@ -62,6 +66,7 @@ export default function ProviderPage() {
         setBaseUrl(nextProvider.baseUrl);
         setStrategy(nextProvider.accountStrategy || "fill-first");
         setEnabled(nextProvider.enabled);
+        providerHealth(slug).then(setHealth).catch(() => setHealth(null));
       })
       .catch((err: Error) => {
         if (!cancel) setError(err.message);
@@ -179,6 +184,7 @@ export default function ProviderPage() {
       const next = await updateProvider(slug, { baseUrl, enabled, accountStrategy: strategy });
       setProvider(next);
       setNotice("Saved.");
+      toast("Provider saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save");
     } finally {
@@ -192,11 +198,11 @@ export default function ProviderPage() {
     setNotice("");
     try {
       const result = await testProvider(slug, { baseUrl, accountId: accounts.find((account) => account.enabled)?.id });
-      setNotice(
-        typeof result.upstreamModels === "number"
-          ? `Key works. The provider listed ${result.upstreamModels} models.`
-          : "The provider answered.",
-      );
+      const message = typeof result.upstreamModels === "number"
+        ? `Key works. The provider listed ${result.upstreamModels} models.`
+        : "The provider answered.";
+      setNotice(message);
+      toast(message);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connection failed");
     } finally {
@@ -369,6 +375,11 @@ export default function ProviderPage() {
       />
       {provider?.summary && (
         <p className="mb-4 max-w-3xl text-sm text-gray-600 dark:text-gray-300">{provider.summary}</p>
+      )}
+      {health && (
+        <p className="mb-4 text-sm text-gray-500">
+          Stored calls: {health.requests} · errors {health.errors} · average latency {health.requests ? `${health.avgLatencyMs} ms` : "—"}
+        </p>
       )}
       {provider && unofficial(provider) && (
         <p className="mb-4 text-xs font-medium tracking-wide text-amber-700 uppercase dark:text-amber-300">Unofficial / experimental</p>

@@ -1,22 +1,23 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
-import { getOverview, listActivity, type ActivityItem, type Overview } from "@/lib/api";
-import { Boxes, Check, Copy, KeyRound, Sparkles } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { Bars } from "@/components/ui/bars";
+import { CopyButton, ErrorNote, LoadingBlock } from "@/components/ui/feedback";
+import { getDashboard, type Dashboard } from "@/lib/api";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+function money(value: number) {
+  return `$${value.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 })}`;
+}
+
 export default function OverviewPage() {
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [data, setData] = useState<Dashboard | null>(null);
   const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let cancel = false;
-    Promise.all([getOverview(), listActivity()])
-      .then(([nextOverview, nextActivity]) => {
-        if (cancel) return;
-        setOverview(nextOverview);
-        setActivity(nextActivity.activity.slice(0, 5));
+    getDashboard()
+      .then((next) => {
+        if (!cancel) setData(next);
       })
       .catch((err: Error) => {
         if (!cancel) setError(err.message);
@@ -26,87 +27,104 @@ export default function OverviewPage() {
     };
   }, []);
 
-  async function copyEndpoint() {
-    if (!overview) return;
-    await navigator.clipboard.writeText(overview.endpoint);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1500);
-  }
-
   return (
     <div>
       <PanelPageHeader
         title="Overview"
+        description="One local endpoint and one router key for every coding agent. Provider keys stay on this computer."
+        actions={data ? <CopyButton text={data.endpoint} label="Copy endpoint" /> : <Link to="/providers" className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white">Add a provider</Link>}
       />
-      {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Stat label="Providers" value={overview?.providers ?? "—"} icon={<Boxes className="h-5 w-5 text-brand-600" />} />
-        <Stat label="Active models" value={overview?.activeModels ?? "—"} icon={<Sparkles className="h-5 w-5 text-emerald-600" />} />
-        <Stat label="Router keys" value={overview?.routerKeys ?? "—"} icon={<KeyRound className="h-5 w-5 text-violet-600" />} />
-        <button type="button" onClick={copyEndpoint} className="panel-card p-4 text-left">
-          <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">Endpoint</p>
-          <p className="mt-1 truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">
-            {overview?.endpoint ?? "—"}
-          </p>
-          <p className="mt-2 flex items-center gap-1 text-xs text-gray-500">
-            {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-            {copied ? "Copied" : "Copy base URL"}
-          </p>
-        </button>
-      </div>
-
-      <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
-        <section className="panel-card panel-card-body">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Start here</h2>
-          <ol className="mt-4 space-y-3 text-sm text-gray-600 dark:text-gray-300">
-            <li>1. Open a provider and save its API key.</li>
-            <li>2. Turn on the models you want this router to expose.</li>
-            <li>3. Create a router key and use it as the OpenAI API key in your app.</li>
-            <li>4. Set the model to <span className="font-mono text-xs">auto</span>, or open Routing to build a combo.</li>
-          </ol>
-          <div className="mt-5 flex flex-wrap gap-2">
-            <Link to="/providers" className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600">
-              Providers
-            </Link>
-            <Link to="/keys" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
-              API keys
-            </Link>
-            <Link to="/clients" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
-              Clients
-            </Link>
+      <ErrorNote>{error}</ErrorNote>
+      {!data && !error && <LoadingBlock label="Loading overview…" />}
+      {data && (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <Stat label="Today's requests" value={String(data.today.requests)} />
+            <Stat label="Today's cost" value={money(data.today.costUsd)} />
+            <Stat label="Errors today" value={String(data.today.errors)} />
+            <Stat label="Avg latency" value={data.today.requests ? `${data.today.avgLatencyMs} ms` : "—"} />
           </div>
-        </section>
-        <section className="panel-card panel-card-body">
-          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Recent activity</h2>
-          {activity.length === 0 ? (
-            <p className="mt-4 text-sm text-gray-500">No requests yet.</p>
-          ) : (
-            <ul className="mt-4 space-y-3">
-              {activity.map((item) => (
-                <li key={item.id} className="flex items-start justify-between gap-3 text-sm">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium text-gray-900 dark:text-white">{item.modelId || "—"}</p>
-                    <p className="text-xs text-gray-500">{item.source}</p>
-                  </div>
-                  <span className={item.statusCode >= 400 ? "text-error-500" : "text-success-600"}>{item.statusCode}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      </div>
+          <p className="mt-3 text-sm text-gray-500">
+            {data.enabledProviders} ready providers · {data.activeModels} active models · {data.routerKeys} router keys · <span className="font-mono">{data.endpoint}</span>
+          </p>
+          <div className="mt-4">
+            <Bars
+              points={(data.days ?? []).map((day) => ({
+                key: day.day,
+                label: day.day.slice(5),
+                value: day.requests,
+                title: `${day.day}: ${day.requests} requests, ${money(day.costUsd)}`,
+              }))}
+            />
+          </div>
+          <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <section className="panel-card panel-card-body">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Setup</h2>
+              <ol className="mt-3 space-y-2">
+                {data.steps.map((step, index) => (
+                  <li key={step.id}>
+                    <Link to={step.href} className="flex items-start gap-2 text-sm text-gray-700 hover:text-brand-600 dark:text-gray-200">
+                      <span className={`mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-medium ${step.done ? "bg-success-50 text-success-600" : "bg-gray-100 text-gray-600 dark:bg-white/10"}`}>
+                        {step.done ? "✓" : index + 1}
+                      </span>
+                      {step.label}
+                    </Link>
+                  </li>
+                ))}
+              </ol>
+            </section>
+            <section className="panel-card overflow-hidden">
+              <h2 className="px-4 pt-4 text-sm font-semibold text-gray-900 dark:text-white">Provider health</h2>
+              {data.providerHealth.length === 0 ? (
+                <p className="px-4 py-4 text-sm text-gray-500">No calls yet. Send one from the playground or a coding agent.</p>
+              ) : (
+                <table className="mt-2 w-full text-left text-sm">
+                  <tbody>
+                    {data.providerHealth.map((row) => (
+                      <tr key={row.provider} className="border-t border-gray-100 dark:border-gray-800">
+                        <td className="px-4 py-2 font-medium">{row.provider || "—"}</td>
+                        <td className="px-4 py-2 text-gray-500">{row.requests} calls</td>
+                        <td className={`px-4 py-2 ${row.errors ? "text-error-500" : "text-gray-500"}`}>{row.errors} errors</td>
+                        <td className="px-4 py-2 text-gray-500">{row.avgLatencyMs} ms</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </section>
+          </div>
+          <section className="panel-card mt-4 overflow-hidden">
+            <div className="flex items-center justify-between px-4 pt-4">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Top models</h2>
+              <Link to="/usage" className="text-sm text-brand-600">Usage</Link>
+            </div>
+            {data.topModels.length === 0 ? (
+              <p className="px-4 py-4 text-sm text-gray-500">Top models appear after the first stored call.</p>
+            ) : (
+              <table className="mt-2 w-full text-left text-sm">
+                <tbody>
+                  {data.topModels.map((row) => (
+                    <tr key={row.modelId} className="border-t border-gray-100 dark:border-gray-800">
+                      <td className="px-4 py-2 font-mono text-xs">{row.modelId || "—"}</td>
+                      <td className="px-4 py-2">{row.requests}</td>
+                      <td className="px-4 py-2 text-gray-500">{money(row.costUsd)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </>
+      )}
     </div>
   );
 }
 
-function Stat({ label, value, icon }: { label: string; value: string | number; icon: ReactNode }) {
+function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="panel-card flex items-center justify-between gap-3 p-4">
-      <div>
-        <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</p>
-        <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{value}</p>
-      </div>
-      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gray-50 dark:bg-white/5">{icon}</div>
+    <div className="panel-card p-4">
+      <p className="text-xs font-medium tracking-wide text-gray-500 uppercase">{label}</p>
+      <p className="mt-1 text-2xl font-semibold text-gray-900 dark:text-white">{value}</p>
     </div>
   );
 }

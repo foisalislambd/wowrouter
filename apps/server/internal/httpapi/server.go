@@ -61,6 +61,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /health", s.health)
 	mux.HandleFunc("POST /api/shutdown", s.shutdown)
 	mux.HandleFunc("GET /api/overview", s.overview)
+	mux.HandleFunc("GET /api/dashboard", s.dashboard)
+	mux.HandleFunc("GET /api/providers/{slug}/health", s.providerHealth)
 	mux.HandleFunc("GET /api/providers", s.listProviders)
 	mux.HandleFunc("GET /api/providers/{slug}", s.getProvider)
 	mux.HandleFunc("PUT /api/providers/{slug}", s.updateProvider)
@@ -174,7 +176,7 @@ func (s *Server) listProviders(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
-	page, err := s.Store.ListProvidersPage(r.URL.Query().Get("q"), r.URL.Query().Get("category"), limit, offset)
+	page, err := s.Store.ListProvidersPage(r.URL.Query().Get("q"), r.URL.Query().Get("category"), limit, offset, r.URL.Query().Get("state"))
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -403,13 +405,15 @@ func (s *Server) deleteKey(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (s *Server) activity(w http.ResponseWriter, _ *http.Request) {
-	items, err := s.Store.ListLogs(50)
+func (s *Server) activity(w http.ResponseWriter, r *http.Request) {
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	items, total, err := s.Store.SearchLogs(r.URL.Query().Get("q"), r.URL.Query().Get("status"), limit, offset)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"activity": items})
+	writeJSON(w, http.StatusOK, map[string]any{"activity": items, "total": total})
 }
 
 func (s *Server) gatewayModels(w http.ResponseWriter, r *http.Request) {

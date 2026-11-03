@@ -1,4 +1,6 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
+import { ConfirmDialog, useToast } from "@/components/ui/feedback";
+import { Link } from "react-router-dom";
 import { hiddenNavHrefs, panelNavItems, saveHiddenNav } from "@/config/panel.config";
 import { clearActivity, getDesktop, getSession, getSettings, saveDesktop, saveFeatures, saveOIDC, savePanelAuth, type Features } from "@/lib/api";
 import { useEffect, useState } from "react";
@@ -22,6 +24,8 @@ export default function SettingsPage() {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
   const [redirectUrl, setRedirectUrl] = useState("");
+  const [confirmClear, setConfirmClear] = useState(false);
+  const toast = useToast();
 
   useEffect(() => {
     getSettings()
@@ -117,6 +121,7 @@ export default function SettingsPage() {
       const saved = await saveFeatures(features);
       setFeatures(saved);
       setAuthMessage("Prompt helpers saved.");
+      toast("Helpers saved");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save prompt helpers");
     } finally {
@@ -125,12 +130,13 @@ export default function SettingsPage() {
   }
 
   async function onClear() {
-    if (!window.confirm("Delete every request log on this computer?")) return;
     setBusy(true);
     setError("");
     try {
       await clearActivity();
       setLogCount(0);
+      setConfirmClear(false);
+      toast("Logs cleared");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not clear logs");
     } finally {
@@ -142,6 +148,8 @@ export default function SettingsPage() {
     <div>
       <PanelPageHeader
         title="Settings"
+        description="Password and sign-in stay off until you turn them on. Provider keys and router keys are separate."
+        actions={<Link to="/changelog" className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 dark:border-gray-700 dark:text-gray-200">Changelog</Link>}
       />
       {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
       <div className="panel-card panel-card-body space-y-4">
@@ -267,7 +275,7 @@ export default function SettingsPage() {
           <p className="text-sm text-gray-600 dark:text-gray-300">{logCount} request logs stored</p>
           <button
             type="button"
-            onClick={onClear}
+            onClick={() => setConfirmClear(true)}
             disabled={busy || logCount === 0}
             className="rounded-lg border border-error-200 px-3 py-2 text-sm font-medium text-error-500 hover:bg-error-50 disabled:opacity-50 dark:border-error-500/30 dark:hover:bg-error-500/10"
           >
@@ -275,6 +283,7 @@ export default function SettingsPage() {
           </button>
         </div>
       </div>
+      <ConfirmDialog open={confirmClear} title="Clear request logs?" body="This deletes every stored call on this computer." confirmLabel="Clear logs" busy={busy} onClose={() => setConfirmClear(false)} onConfirm={onClear} />
     </div>
   );
 }

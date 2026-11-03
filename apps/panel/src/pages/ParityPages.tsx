@@ -1,5 +1,7 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
 import { MarkdownView } from "@/components/markdown-view";
+import { DangerButton, EmptyState, ErrorNote, LoadingBlock } from "@/components/ui/feedback";
+import { activityTabs, agentTabs, costTabs, endpointTabs, healthTabs, keyTabs, localTabs, PageTabs, routeTabs, type PageTab } from "@/components/ui/page-tabs";
 import {
   addAgentNote,
   addBookmark,
@@ -42,22 +44,13 @@ import {
   type Guards,
 } from "@/lib/api";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 
-function Frame({ title, lede, children, links }: { title: string; lede: string; children: ReactNode; links?: { href: string; label: string }[] }) {
+function Frame({ title, lede, children, tabs, actions }: { title: string; lede: string; children: ReactNode; tabs?: PageTab[]; actions?: ReactNode }) {
   return (
     <div>
-      <PanelPageHeader title={title} />
-      <p className="mb-4 max-w-3xl text-sm text-gray-600 dark:text-gray-300">{lede}</p>
-      {links && (
-        <div className="mb-4 flex flex-wrap gap-2">
-          {links.map((link) => (
-            <Link key={link.href} to={link.href} className="rounded-full border border-gray-200 px-3 py-1 text-xs font-medium text-gray-700 dark:border-gray-700 dark:text-gray-200">
-              {link.label}
-            </Link>
-          ))}
-        </div>
-      )}
+      <PanelPageHeader title={title} description={lede} actions={actions} />
+      {tabs && <PageTabs tabs={tabs} />}
       {children}
     </div>
   );
@@ -66,35 +59,82 @@ function Frame({ title, lede, children, links }: { title: string; lede: string; 
 function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
   useEffect(() => {
     let cancel = false;
+    setLoading(true);
     loader()
       .then((next) => {
-        if (!cancel) setData(next);
+        if (!cancel) {
+          setData(next);
+          setError("");
+        }
       })
       .catch((err: Error) => {
         if (!cancel) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancel) setLoading(false);
       });
     return () => {
       cancel = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, ...deps]);
-  return { data, error, setError, reload: () => setTick((value) => value + 1) };
+  return { data, error, loading, setError, reload: () => setTick((value) => value + 1) };
 }
 
 const field = "mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white";
 const button = "rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60";
 
 export function ModelsPage() {
-  const [q, setQ] = useState("");
-  const { data, error } = useLoad(() => catalogModels({ q, limit: 40 }), [q]);
+  const [params, setParams] = useSearchParams();
+  const [q, setQ] = useState(params.get("q") ?? "");
+  const [query, setQuery] = useState(params.get("q") ?? "");
+  const kind = params.get("kind") ?? "";
+  const sort = params.get("sort") ?? "name";
+  const page = Math.max(1, Number(params.get("page") || "1"));
+  const limit = 20;
+  const { data, error, loading } = useLoad(() => catalogModels({ q: query, kind, sort: sort === "name" ? "" : sort, limit, offset: (page - 1) * limit }), [query, kind, sort, page]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setQuery(q.trim()), 200);
+    return () => window.clearTimeout(timer);
+  }, [q]);
+  function setParam(key: string, value: string) {
+    const next = new URLSearchParams(params);
+    if (value) next.set(key, value);
+    else next.delete(key);
+    if (key !== "page") next.delete("page");
+    setParams(next, { replace: true });
+  }
+  const total = data?.total ?? 0;
   return (
     <Frame title="Models" lede="Every model stored for every provider. Turn a model on from its provider page before a client can call it.">
-      {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
-      <input value={q} onChange={(event) => setQ(event.target.value)} placeholder="Search models" className={field + " mb-4 max-w-md"} />
-      <ModelTable models={data?.models ?? []} />
+      <ErrorNote>{error}</ErrorNote>
+      <div className="mb-4 flex flex-col gap-2 sm:flex-row">
+        <input value={q} onChange={(event) => { setQ(event.target.value); setParam("q", event.target.value); }} placeholder="Search models" aria-label="Search models" className={field + " max-w-md"} />
+        <select aria-label="Kind" value={kind} onChange={(event) => setParam("kind", event.target.value)} className={field + " sm:w-40"}>
+          <option value="">All kinds</option>
+          <option value="chat">Chat</option>
+          <option value="search">Search</option>
+          <option value="image">Image</option>
+          <option value="embedding">Embedding</option>
+        </select>
+        <select aria-label="Sort" value={sort} onChange={(event) => setParam("sort", event.target.value)} className={field + " sm:w-40"}>
+          <option value="name">Name</option>
+          <option value="price">Price</option>
+          <option value="provider">Provider</option>
+        </select>
+      </div>
+      {loading ? <LoadingBlock label="Loading models…" /> : <ModelTable models={data?.models ?? []} />}
+      <div className="mt-3 flex items-center justify-between text-sm text-gray-500">
+        <span>{total} models</span>
+        <div className="flex gap-2">
+          <button type="button" disabled={page <= 1} onClick={() => setParam("page", String(page - 1))} className="rounded-lg border border-gray-200 px-3 py-1 disabled:opacity-40 dark:border-gray-700">Previous</button>
+          <button type="button" disabled={page * limit >= total} onClick={() => setParam("page", String(page + 1))} className="rounded-lg border border-gray-200 px-3 py-1 disabled:opacity-40 dark:border-gray-700">Next</button>
+        </div>
+      </div>
     </Frame>
   );
 }
@@ -133,7 +173,7 @@ function ModelTable({ models }: { models: CatalogModel[] }) {
 export function QuotaPage() {
   const { data, error } = useLoad(() => quotaSlots());
   return (
-    <Frame title="Quota" lede="Rate-limit headers providers sent on recent calls. A slot appears after the first response that includes them. Combo strategies fill-first, headroom, reset-window, quota-weighted, and quota-share read this table.">
+    <Frame title="Quota" tabs={routeTabs} lede="Rate-limit headers providers sent on recent calls. A slot appears after the first response that includes them. Combo strategies fill-first, headroom, reset-window, quota-weighted, and quota-share read this table.">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <div className="grid gap-3">
         {(data?.slots ?? []).map((slot) => (
@@ -142,7 +182,7 @@ export function QuotaPage() {
             <p className="mt-1 text-gray-600 dark:text-gray-300">Remaining {slot.remaining} of {slot.limit}. Reset {slot.resetUnix || "unknown"}. Cooldown until {slot.cooldownUntil || "none"}.</p>
           </section>
         ))}
-        {data && data.slots.length === 0 && <p className="text-sm text-gray-500">No quota headers saved yet.</p>}
+        {data && data.slots.length === 0 && <EmptyState title="No quota headers yet" body="A slot appears after a provider response includes rate-limit headers. Combo strategies then read this list." />}
       </div>
     </Frame>
   );
@@ -151,7 +191,7 @@ export function QuotaPage() {
 export function EndpointsPage() {
   const { data, error } = useLoad(() => endpointList());
   return (
-    <Frame title="Endpoints" lede="The local routes this process serves. Clients use a router key on /v1. The panel uses the /api routes." links={[{ href: "/translator", label: "Translator" }, { href: "/onboarding", label: "Onboarding" }]}>
+    <Frame title="Endpoints" tabs={endpointTabs} lede="The local routes this process serves. Clients use a router key on /v1. The panel uses the /api routes.">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <p className="mb-3 font-mono text-sm text-gray-800 dark:text-gray-100">{data?.base}</p>
       <div className="grid gap-2">
@@ -183,7 +223,7 @@ export function TranslatorPage() {
     }
   }
   return (
-    <Frame title="Translator" lede="Converts a text chat body between OpenAI and Anthropic shapes on this computer. It does not call a provider.">
+    <Frame title="Translator" tabs={endpointTabs} lede="Converts a text chat body between OpenAI and Anthropic shapes on this computer. It does not call a provider.">
       <form onSubmit={onSubmit} className="panel-card panel-card-body space-y-3">
         <select value={direction} onChange={(event) => setDirection(event.target.value)} className={field}>
           <option value="openai-to-anthropic">OpenAI to Anthropic</option>
@@ -201,7 +241,7 @@ export function TranslatorPage() {
 export function HealthPage() {
   const { data, error } = useLoad(() => healthDetail());
   return (
-    <Frame title="Health" lede="Process and catalog counts. This is not a remote status page. GET /health stays the process check." links={[{ href: "/status/chaos", label: "Chaos" }, { href: "/status/proxy", label: "Upstream proxy" }, { href: "/console", label: "Console" }]}>
+    <Frame title="Health" tabs={healthTabs} lede="Process and catalog counts. This is not a remote status page. GET /health stays the process check.">
       {error && <p className="text-sm text-error-500">{error}</p>}
       {data && (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -251,7 +291,7 @@ export function ChaosPage() {
   }
   if (!form) return <Frame title="Chaos" lede="Loading…">{error && <p className="text-sm text-error-500">{error}</p>}</Frame>;
   return (
-    <Frame title="Chaos" lede="Off by default. When it is on, chat calls can be delayed or rejected before they leave this computer. Use it to test a client, then turn it off.">
+    <Frame title="Chaos" tabs={healthTabs} lede="Off by default. When it is on, chat calls can be delayed or rejected before they leave this computer. Use it to test a client, then turn it off.">
       <form onSubmit={onSave} className="panel-card panel-card-body space-y-3 text-sm">
         <label className="flex items-center gap-2"><input type="checkbox" checked={form.chaos} onChange={(event) => setForm({ ...form, chaos: event.target.checked })} /> Enable chaos</label>
         <label>Fail percent <input type="number" min={0} max={100} value={form.chaosFailPercent} onChange={(event) => setForm({ ...form, chaosFailPercent: Number(event.target.value) })} className={field} /></label>
@@ -281,7 +321,7 @@ export function ProxyPage() {
     }
   }
   return (
-    <Frame title="Upstream proxy" lede="Optional HTTP proxy for calls WowRouter makes to providers. Empty means a direct connection. This is not TLS interception.">
+    <Frame title="Upstream proxy" tabs={healthTabs} lede="Optional HTTP proxy for calls WowRouter makes to providers. Empty means a direct connection. This is not TLS interception.">
       <form onSubmit={onSave} className="panel-card panel-card-body space-y-3">
         <input value={proxy} onChange={(event) => setProxy(event.target.value)} placeholder="http://127.0.0.1:8888" className={field} />
         {error && <p className="text-sm text-error-500">{error}</p>}
@@ -294,7 +334,7 @@ export function ProxyPage() {
 export function ConsolePage() {
   const { data, error, reload } = useLoad(() => consoleLines());
   return (
-    <Frame title="Console" lede="Events this process recorded for webhooks, cache clears, and guard changes. Request errors stay on Activity.">
+    <Frame title="Console" tabs={healthTabs} lede="Events this process recorded for webhooks, cache clears, and guard changes. Request errors stay on Activity.">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <button type="button" onClick={reload} className={button}>Refresh</button>
       <pre className="panel-card panel-card-body mt-3 overflow-x-auto text-xs">{(data?.lines ?? []).join("\n") || "No events yet."}</pre>
@@ -305,7 +345,7 @@ export function ConsolePage() {
 export function CostsPage() {
   const { data, error } = useLoad(() => costReport());
   return (
-    <Frame title="Costs" lede="Catalog price times the tokens stored on each call. Streaming calls without a token count stay at zero." links={[{ href: "/costs/pricing", label: "Pricing" }, { href: "/costs/free", label: "Free tiers" }, { href: "/costs/teams", label: "Teams" }]}>
+    <Frame title="Costs" tabs={costTabs} lede="Catalog price times the tokens stored on each call. Streaming calls without a token count stay at zero.">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <p className="mb-3 text-sm font-medium">Recorded spend ${data?.totalUsd.toFixed(4) ?? "0"}</p>
       {(data?.byModel ?? []).map((row) => (
@@ -318,7 +358,7 @@ export function CostsPage() {
 export function PricingPage() {
   const { data, error } = useLoad(() => catalogModels({ limit: 40, priced: true }));
   return (
-    <Frame title="Pricing" lede="Input and output USD per million tokens from the catalog. Rows with no stored price are left off this list.">
+    <Frame title="Pricing" tabs={costTabs} lede="Input and output USD per million tokens from the catalog. Rows with no stored price are left off this list.">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <ModelTable models={data?.models ?? []} />
     </Frame>
@@ -328,7 +368,7 @@ export function PricingPage() {
 export function FreePage() {
   const { data, error } = useLoad(() => freeProviders());
   return (
-    <Frame title="Free tiers" lede="Providers the catalog marks free. A free flag is not a promise that the upstream quota is still open.">
+    <Frame title="Free tiers" tabs={costTabs} lede="Providers the catalog marks free. A free flag is not a promise that the upstream quota is still open.">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <div className="grid gap-3">
         {(data?.providers ?? []).slice(0, 40).map((provider) => (
@@ -360,7 +400,7 @@ export function TeamsPage() {
     }
   }
   return (
-    <Frame title="Teams" lede="A team cap is shared by the router keys you list. A call is refused when the team's month spend reaches the cap.">
+    <Frame title="Teams" tabs={costTabs} lede="A team cap is shared by the router keys you list. A call is refused when the team's month spend reaches the cap.">
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 grid gap-2 sm:grid-cols-4">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Team name" className={field} />
@@ -374,7 +414,7 @@ export function TeamsPage() {
             <p className="font-medium">{team.name}</p>
             <p className="text-gray-500">Cap {team.monthlyBudgetUsd ?? "none"} · keys {team.keyIds.join(", ") || "none"}</p>
           </div>
-          <button type="button" className="text-error-500" onClick={() => deleteTeam(team.id).then(reload)}>Delete</button>
+          <DangerButton label="Delete" title={`Delete ${team.name}?`} body="Member keys keep working, but the shared cap is removed." onConfirm={async () => { await deleteTeam(team.id); reload(); }} />
         </section>
       ))}
     </Frame>
@@ -399,7 +439,7 @@ export function LimitsPage() {
     }
   }
   return (
-    <Frame title="Limits" lede="Monthly dollar caps are set on each API key. This page sets an optional requests-per-minute cap for every router key. Zero means no per-minute cap. Playground calls are not counted.">
+    <Frame title="Limits" tabs={keyTabs} lede="Monthly dollar caps are set on each API key. This page sets an optional requests-per-minute cap for every router key. Zero means no per-minute cap. Playground calls are not counted.">
       <form onSubmit={onSave} className="panel-card panel-card-body space-y-3">
         <input type="number" min={0} max={600} value={rpm} onChange={(event) => setRpm(Number(event.target.value))} className={field + " max-w-xs"} />
         {error && <p className="text-sm text-error-500">{error}</p>}
@@ -439,7 +479,7 @@ export function WebhooksPage() {
             <p className="font-mono">{hook.url}</p>
             <p className="text-gray-500">{hook.hint || "no secret"}</p>
           </div>
-          <button type="button" className="text-error-500" onClick={() => deleteWebhook(hook.id).then(reload)}>Delete</button>
+          <DangerButton label="Delete" title="Delete this webhook?" body="Later calls will not be posted to this URL." onConfirm={async () => { await deleteWebhook(hook.id); reload(); }} />
         </section>
       ))}
     </Frame>
@@ -453,7 +493,7 @@ export function BatchesPage() {
     <Frame title="Batches" lede="Files and batch jobs created through POST /v1/files and POST /v1/batches. A batch is at most 40 JSONL lines and runs on this computer.">
       <h2 className="mb-2 text-sm font-semibold">Files</h2>
       {(files.data?.files ?? []).map((file) => <p key={file.id} className="text-sm">{file.filename} · {file.bytes} bytes · {file.purpose}</p>)}
-      {files.data && files.data.files.length === 0 && <p className="text-sm text-gray-500">No files.</p>}
+      {files.data && files.data.files.length === 0 && <EmptyState title="No files" body="POST /v1/files with a router key stores a file here. Batches accept at most 40 JSONL lines." />}
       <h2 className="mt-4 mb-2 text-sm font-semibold">Batches</h2>
       {(batches.data?.batches ?? []).map((batch) => <p key={batch.id} className="text-sm">{batch.id} · {batch.status} · {batch.endpoint}</p>)}
       {batches.data && batches.data.batches.length === 0 && <p className="text-sm text-gray-500">No batches.</p>}
@@ -463,12 +503,12 @@ export function BatchesPage() {
 }
 
 export function CachePage() {
-  const { data, error, setError, reload } = useLoad(() => cacheStats());
+  const { data, error, reload } = useLoad(() => cacheStats());
   return (
-    <Frame title="Cache" lede="Non-streaming chat replies stored on this computer when the response cache is on in Settings. Streaming calls are not cached.">
+    <Frame title="Cache" tabs={localTabs} lede="Non-streaming chat replies stored on this computer when the response cache is on in Settings. Streaming calls are not cached.">
       {error && <p className="text-sm text-error-500">{error}</p>}
       <p className="text-sm">Enabled: {data?.enabled ? "yes" : "no"}. Entries: {data?.entries ?? 0}. TTL {data?.ttl ?? 0}s. Oldest {data?.oldest || "—"}.</p>
-      <button type="button" className={button + " mt-3"} onClick={() => clearCache().then(reload).catch((err: Error) => setError(err.message))}>Clear cache</button>
+      <DangerButton label="Clear cache" title="Clear cached replies?" body="The next matching call will ask the provider again." onConfirm={async () => { await clearCache(); reload(); }} />
     </Frame>
   );
 }
@@ -489,7 +529,7 @@ export function CompressionPage() {
     }
   }
   return (
-    <Frame title="Compression" lede="Local text rewrites. Pick the mode in Settings to apply it to chat calls. Neural compressors such as LLMLingua are not bundled.">
+    <Frame title="Compression" tabs={localTabs} lede="Local text rewrites. Pick the mode in Settings to apply it to chat calls. Neural compressors such as LLMLingua are not bundled.">
       <form onSubmit={onPreview} className="panel-card panel-card-body space-y-3">
         <select value={mode} onChange={(event) => setMode(event.target.value)} className={field}>
           {["light", "caveman", "dedup", "headroom", "rtk", "terse", "ultra"].map((item) => <option key={item}>{item}</option>)}
@@ -507,7 +547,7 @@ export function AuditPage() {
   const [source, setSource] = useState("mcp");
   const { data, error } = useLoad(() => auditLogs(source), [source]);
   return (
-    <Frame title="Audit" lede="Calls whose source is MCP, A2A, an eval run, or a batch job.">
+    <Frame title="Audit" tabs={activityTabs} lede="Calls whose source is MCP, A2A, an eval run, or a batch job.">
       <select value={source} onChange={(event) => setSource(event.target.value)} className={field + " mb-3 max-w-xs"}>
         <option value="mcp">MCP</option>
         <option value="a2a">A2A</option>
@@ -584,7 +624,7 @@ export function SkillsPage() {
     }
   }
   return (
-    <Frame title="Skills" lede="Instructions you keep on this computer. They are not executed as code. Copy one into a prompt, or let an A2A client read the agent card at /.well-known/agent-card.json.">
+    <Frame title="Skills" tabs={agentTabs} lede="Instructions you keep on this computer. They are not executed as code. Copy one into a prompt, or let an A2A client read the agent card at /.well-known/agent-card.json.">
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 space-y-2">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" className={field} />
@@ -593,7 +633,7 @@ export function SkillsPage() {
       </form>
       {(data?.skills ?? []).map((skill) => (
         <section key={skill.id} className="panel-card panel-card-body mb-2 text-sm">
-          <div className="flex justify-between"><p className="font-medium">{skill.name}</p><button type="button" className="text-error-500" onClick={() => deleteSkill(skill.id).then(reload)}>Delete</button></div>
+          <div className="flex justify-between"><p className="font-medium">{skill.name}</p><DangerButton label="Delete" title={`Delete ${skill.name}?`} body="The instruction is removed from this computer." onConfirm={async () => { await deleteSkill(skill.id); reload(); }} /></div>
           <p className="mt-1 whitespace-pre-wrap text-gray-600 dark:text-gray-300">{skill.instruction}</p>
         </section>
       ))}
@@ -635,7 +675,7 @@ export function EvalsPage() {
           </div>
           <div className="flex gap-3">
             <button type="button" onClick={() => runEval(item.id).then(reload).catch((err: Error) => setError(err.message))}>Run</button>
-            <button type="button" className="text-error-500" onClick={() => deleteEval(item.id).then(reload)}>Delete</button>
+            <DangerButton label="Delete" title={`Delete ${item.name}?`} body="The stored prompt and expected text are removed." onConfirm={async () => { await deleteEval(item.id); reload(); }} />
           </div>
         </section>
       ))}
@@ -661,7 +701,7 @@ export function AgentsPage() {
     }
   }
   return (
-    <Frame title="Agents" lede="Cloud agents Jules, Devin, and Codex Cloud are providers. CLI and ACP notes are records only: WowRouter does not launch a shell or speak a private agent protocol.">
+    <Frame title="Agents" tabs={agentTabs} lede="Cloud agents Jules, Devin, and Codex Cloud are providers. CLI and ACP notes are records only: WowRouter does not launch a shell or speak a private agent protocol.">
       {error && <p className="mb-3 text-sm text-error-500">{error}</p>}
       <form onSubmit={onAdd} className="panel-card panel-card-body mb-4 grid gap-2 sm:grid-cols-4">
         <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Name" className={field} />
@@ -676,7 +716,7 @@ export function AgentsPage() {
       {(data?.agents ?? []).map((agent) => (
         <section key={agent.id} className="panel-card panel-card-body mb-2 flex justify-between text-sm">
           <p>{agent.name} · {agent.kind} · {agent.detail}</p>
-          <button type="button" className="text-error-500" onClick={() => deleteAgentNote(agent.id).then(reload)}>Delete</button>
+          <DangerButton label="Delete" title={`Delete ${agent.name}?`} body="This only removes the note. It does not stop a cloud agent." onConfirm={async () => { await deleteAgentNote(agent.id); reload(); }} />
         </section>
       ))}
       <h2 className="mt-4 mb-2 text-sm font-semibold">Recent calls</h2>
@@ -712,7 +752,7 @@ export function ServicesPage() {
       {(data?.bookmarks ?? []).map((item) => (
         <section key={item.id} className="panel-card panel-card-body mb-2 flex justify-between text-sm">
           <a href={item.url} target="_blank" rel="noreferrer" className="text-brand-600">{item.name}</a>
-          <button type="button" className="text-error-500" onClick={() => deleteBookmark(item.id).then(reload)}>Delete</button>
+          <DangerButton label="Delete" title={`Delete ${item.name}?`} body="The bookmark is removed. The other app is unchanged." onConfirm={async () => { await deleteBookmark(item.id); reload(); }} />
         </section>
       ))}
     </Frame>

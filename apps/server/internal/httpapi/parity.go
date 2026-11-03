@@ -68,12 +68,13 @@ func (s *Server) parityRoutes(mux *http.ServeMux) {
 func (s *Server) catalogModels(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	priced := r.URL.Query().Get("priced") == "1"
-	items, err := s.Store.SearchModels(r.URL.Query().Get("q"), r.URL.Query().Get("kind"), limit, priced)
+	offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+	items, total, err := s.Store.SearchModels(r.URL.Query().Get("q"), r.URL.Query().Get("kind"), r.URL.Query().Get("sort"), limit, offset, priced)
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"models": items})
+	writeJSON(w, http.StatusOK, map[string]any{"models": items, "total": total})
 }
 
 func (s *Server) freeProviders(w http.ResponseWriter, _ *http.Request) {
@@ -158,7 +159,7 @@ func (s *Server) costs(w http.ResponseWriter, _ *http.Request) {
 	for _, row := range rows {
 		total += row.CostUSD
 	}
-	priced, _ := s.Store.SearchModels("", "", 30, true)
+	priced, _, _ := s.Store.SearchModels("", "", "price", 30, 0, true)
 	writeJSON(w, http.StatusOK, map[string]any{"totalUsd": total, "byModel": rows, "prices": priced})
 }
 
