@@ -12,9 +12,24 @@ const (
 	StrategyRoundRobin = "round-robin"
 	StrategyWeighted   = "weighted"
 	StrategyCost       = "cost"
-	StrategyLeastUsed  = "least-used"
-	StrategyDirect     = "direct"
+	StrategyLeastUsed      = "least-used"
+	StrategyFillFirst      = "fill-first"
+	StrategyHeadroom       = "headroom"
+	StrategyResetWindow    = "reset-window"
+	StrategyQuotaWeighted  = "quota-weighted"
+	StrategyQuotaShare     = "quota-share"
+	StrategyDirect         = "direct"
 )
+
+// Window is what we know about one target's quota. Remaining -1 means the provider did not say.
+type Window struct {
+	Remaining     int
+	Limit         int
+	ResetUnix     int64
+	CooldownUntil int64
+	Used          int
+	Share         int
+}
 
 // Candidate is one chat model the ranker can see. Prices are USD per million tokens.
 type Candidate struct {
@@ -48,7 +63,8 @@ func NormalizeStrategy(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", StrategyPriority:
 		return StrategyPriority, nil
-	case StrategyRoundRobin, StrategyWeighted, StrategyCost, StrategyLeastUsed:
+	case StrategyRoundRobin, StrategyWeighted, StrategyCost, StrategyLeastUsed,
+		StrategyFillFirst, StrategyHeadroom, StrategyResetWindow, StrategyQuotaWeighted, StrategyQuotaShare:
 		return strings.ToLower(strings.TrimSpace(value)), nil
 	default:
 		return "", errStrategy
@@ -281,4 +297,4 @@ type strategyError string
 
 func (e strategyError) Error() string { return string(e) }
 
-const errStrategy strategyError = "strategy must be priority, round-robin, weighted, cost, or least-used"
+const errStrategy strategyError = "strategy must be priority, round-robin, weighted, cost, least-used, fill-first, headroom, reset-window, quota-weighted, or quota-share"

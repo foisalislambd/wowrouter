@@ -56,7 +56,7 @@ curl http://127.0.0.1:8787/v1/chat/completions \
 
 You can also set the model to `auto` (or `auto/cheap`, `auto/fast`, `auto/coding`) and let the router choose among the chat models you turned on. A named combo uses an id like `fallback/daily`.
 
-Chat calls need three things at once: a saved provider key, the model switched on, and a router key on the request. The panel does not ask you to log in unless you turn on a password in **Settings**. Leave that off on your own computer. Turn it on before you publish the port, for example from Docker on a VPS. The password protects the panel and its management API. Cursor still uses the separate router key.
+Chat calls need three things at once: a saved provider key, the model switched on, and a router key on the request. The panel does not ask you to log in unless you turn on a password or OIDC in **Settings**. Leave both off on your own computer. Turn one on before you publish the port, for example from Docker on a VPS. Either lock protects the panel and its management API. Cursor still uses the separate router key.
 
 Some providers ship with an empty model list. **Load models** on that provider's page fills the list from the provider. Loading replaces that provider's current model list.
 
@@ -70,9 +70,10 @@ Some providers ship with an empty model list. **Load models** on that provider's
 | API keys | Router keys for Cursor and other clients. The full secret is shown only when you create it |
 | Playground | Try a chat, media, or decision call without leaving the panel |
 | Activity | Each gateway call. Open one row to see the request and response |
-| Clients | Copy-paste setup for Cursor, OpenCode, and other OpenAI-compatible tools |
+| Clients | Copy-paste setup, plus a confirmed one-click writer for Claude Code, OpenCode, and Codex |
 | Usage | Calls grouped by model, with a 14-day chart and estimated cost |
-| Settings | Data folder, listen address, optional panel password, and, on Windows, start with Windows |
+| Memory | Optional notes prepended to chat calls when the memory toggle is on |
+| Settings | Data folder, listen address, optional password or OIDC, cache, compression, memory, and, on Windows, start with Windows |
 
 Closing the browser tab does not stop the router.
 

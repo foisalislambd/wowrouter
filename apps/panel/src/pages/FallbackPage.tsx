@@ -8,6 +8,11 @@ const strategies = [
   { id: "weighted", label: "Weighted", detail: "Start on a model more often when its weight is higher, then fall through the rest." },
   { id: "cost", label: "Cheapest", detail: "Try the lowest catalog price first." },
   { id: "least-used", label: "Least used", detail: "Start with the model that has the fewest logged calls." },
+  { id: "fill-first", label: "Fill first", detail: "Skip models that are cooling down or out of requests, then keep the saved order." },
+  { id: "headroom", label: "Headroom", detail: "Prefer the model with the largest share of its limit left. Unknown limits stay in the saved order." },
+  { id: "reset-window", label: "Reset window", detail: "Prefer the model whose limit resets sooner." },
+  { id: "quota-weighted", label: "Quota weighted", detail: "Start more often on models that have more requests left." },
+  { id: "quota-share", label: "Quota share", detail: "Spread calls across models. A model that already used its local share waits behind the others." },
 ];
 
 const autos = [

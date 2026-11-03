@@ -70,6 +70,7 @@ func (s *Server) proxySpecial(w http.ResponseWriter, r *http.Request, source, ke
 		return true
 	}
 	defer resp.Body.Close()
+	s.noteQuota(route, resp.StatusCode, resp.Header)
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		if retry {

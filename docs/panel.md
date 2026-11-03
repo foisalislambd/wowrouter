@@ -1,6 +1,6 @@
 # Panel
 
-The panel is the web page at `http://127.0.0.1:8787`. You use it to manage providers, models, and the key your tools send. It does not ask you to log in until you turn on a password in **Settings**.
+The panel is the web page at `http://127.0.0.1:8787`. You use it to manage providers, models, and the key your tools send. It does not ask you to log in until you turn on a password or OIDC in **Settings**.
 
 ## Pages
 
@@ -9,12 +9,13 @@ The panel is the web page at `http://127.0.0.1:8787`. You use it to manage provi
 | Overview | See that the router is up, and how many keys and calls you have |
 | Providers | Save a provider key, set a base URL, and turn models on |
 | Routing | Use `auto`, or save a combo that tries the next model when one fails |
-| Clients | Copy the base URL and a sample config for Cursor, OpenCode, Cline, or a script |
+| Clients | Copy a sample config, or write Claude Code, OpenCode, and Codex config on this computer after you confirm |
 | API keys | Create the key Cursor will use. A monthly dollar cap is optional |
 | Playground | Try a prompt, an image, or a decision before you wire up a tool |
 | Activity | Read one call at a time, including the request that was sent |
 | Usage | See calls grouped by model |
-| Settings | See the data folder and the listen address. Turn on a panel password if this router will be reachable from another machine. On Windows, start with Windows |
+| Memory | Notes that chat calls can include when memory is on |
+| Settings | Data folder, listen address, optional password or OIDC, and the cache, compression, and memory toggles. On Windows, start with Windows |
 
 ## A normal first visit
 
@@ -61,6 +62,14 @@ The password is off when you install WowRouter. The panel and `GET /health` stay
 Turn the password on from **Settings** when the process can be reached from outside this computer. The password is stored as a bcrypt hash. A signed-in browser gets an HttpOnly session cookie that lasts 14 days. Wrong passwords are throttled. Changing the password signs other browsers out. Turning it off deletes the hash and the sessions, and the panel is open again.
 
 The router key your tools send is not this password.
+
+OIDC is a second optional lock. Leave it off unless you want the panel to send you to an identity provider. The redirect URL is shown in Settings. An issuer must be `https`, except `http` on localhost. The client secret is encrypted with the same local key as provider secrets. If either the password or OIDC is on, the panel asks you to sign in. If neither is on, it stays open.
+
+Prompt compression, the response cache, and memory are also in Settings and start off. Memory notes live on the Memory page.
+
+## What this router does not intercept
+
+WowRouter does not install a certificate authority or intercept TLS. Point a client at the router on purpose. Capturing traffic from programs that were not aimed at WowRouter is out of scope.
 
 ## If a call fails in the playground
 

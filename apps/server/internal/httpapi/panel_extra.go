@@ -71,10 +71,23 @@ func (s *Server) settings(w http.ResponseWriter, _ *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	features, err := s.Store.Features()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	oidc, err := s.Store.OIDCPublic()
+	if err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"dataDir":  s.DataDir,
-		"address":  s.Addr,
-		"logCount": count,
+		"dataDir":     s.DataDir,
+		"address":     s.Addr,
+		"logCount":    count,
+		"features":    features,
+		"oidc":        oidc,
+		"redirectUrl": "http://" + s.Addr + "/api/oidc/callback",
 	})
 }
 
