@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"wowrouter/server/internal/combo"
+	"wowrouter/server/internal/gateway"
 	"wowrouter/server/internal/presets"
 )
 
@@ -147,8 +148,13 @@ func (s *Server) mcp(w http.ResponseWriter, r *http.Request) {
 	case "tools/call":
 		params, _ := req["params"].(map[string]any)
 		name := str(params["name"])
+		args, _ := params["arguments"].(map[string]any)
 		writeJSON(w, http.StatusOK, rpcOK(id, map[string]any{"content": []any{
-			map[string]any{"type": "text", "text": s.mcpCall(name)},
+			map[string]any{"type": "text", "text": s.mcpCall(name, args)},
+		}}))
+	case "resources/list":
+		writeJSON(w, http.StatusOK, rpcOK(id, map[string]any{"resources": []any{
+			map[string]any{"uri": "wowrouter://health", "name": "health", "mimeType": "application/json"},
 		}}))
 	case "ping":
 		writeJSON(w, http.StatusOK, rpcOK(id, map[string]any{}))
@@ -165,6 +171,7 @@ func mcpTools() []any {
 		{"list_combos", "Routing combos"},
 		{"list_presets", "How many provider presets are available"},
 		{"list_strategies", "Combo routing strategies and auto models"},
+		{"chat", "Send one user prompt through a configured model"},
 	}
 	var out []any
 	for _, tool := range names {
@@ -176,7 +183,7 @@ func mcpTools() []any {
 	return out
 }
 
-func (s *Server) mcpCall(name string) string {
+func (s *Server) mcpCall(name string, args map[string]any) string {
 	switch name {
 	case "health":
 		return `{"status":"ok"}`
@@ -195,6 +202,20 @@ func (s *Server) mcpCall(name string) string {
 			names = append(names, item.Name)
 		}
 		raw, _ := json.Marshal(names)
+		return string(raw)
+	case "chat":
+		if s.Admin == nil || s.Admin.Engine == nil {
+			return `{"error":"gateway is not configured"}`
+		}
+		model := str(args["model"])
+		prompt := str(args["prompt"])
+		if model == "" || prompt == "" {
+			return `{"error":"model and prompt are required"}`
+		}
+		out := s.Admin.Engine.Handle(gateway.Call{Model: model, Body: map[string]any{
+			"model": model, "messages": []any{map[string]any{"role": "user", "content": prompt}},
+		}, Dialect: "openai"})
+		raw, _ := json.Marshal(map[string]any{"status": out.Status, "text": gateway.ResponseText(out.Body), "error": out.Error})
 		return string(raw)
 	default:
 		return `{"error":"unknown tool"}`

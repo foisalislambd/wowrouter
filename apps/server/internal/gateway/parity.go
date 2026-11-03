@@ -211,14 +211,86 @@ func (e *Engine) pipeline(call Call, leaves []Leaf, finish func(Leaf, int, []byt
 		if i == len(leaves)-1 {
 			break
 		}
-		body = map[string]any{
-			"model": call.Model,
-			"messages": []any{map[string]any{
-				"role": "user", "content": ResponseText(raw),
-			}},
+		messages := asSlice(body["messages"])
+		if len(messages) == 0 {
+			messages = asSlice(call.Body["messages"])
 		}
+		messages = append(messages, map[string]any{
+			"role": "assistant",
+			"content": []any{
+				map[string]any{"type": "text", "text": ResponseText(raw)},
+				map[string]any{"type": "wowrouter_stage", "stage": map[string]any{
+					"index": i, "provider": leaf.Provider, "deployment": leaf.Deployment, "raw": json.RawMessage(raw),
+				}},
+			},
+		})
+		body = map[string]any{"model": call.Model, "messages": messages}
 	}
 	return finish(last, http.StatusOK, payload)
+}
+
+func (e *Engine) judge(call Call, leaves []Leaf, finish func(Leaf, int, []byte) Outcome, out *Outcome) Outcome {
+	if len(leaves) < 2 {
+		if len(leaves) == 0 {
+			out.Status = http.StatusBadGateway
+			out.Error = "the route has no deployment"
+			out.Body = errorBody(out.Error)
+			e.log(call, *out, nil)
+			return *out
+		}
+		out.Attempts++
+		status, payload, err := e.one(leaves[0], call.Body)
+		if err != nil || status >= 400 {
+			out.Status = http.StatusBadGateway
+			out.Error = errString(err, status)
+			out.Body = errorBody(out.Error)
+			e.log(call, *out, nil)
+			return *out
+		}
+		return finish(leaves[0], status, payload)
+	}
+	judgeLeaf := leaves[0]
+	var candidates []any
+	var first []byte
+	var firstLeaf Leaf
+	for _, leaf := range leaves[1:] {
+		out.Attempts++
+		status, payload, err := e.one(leaf, call.Body)
+		if err != nil || status >= 400 {
+			continue
+		}
+		if first == nil {
+			first = append([]byte(nil), payload...)
+			firstLeaf = leaf
+		}
+		candidates = append(candidates, map[string]any{
+			"provider": leaf.Provider, "deployment": leaf.Deployment, "text": ResponseText(payload),
+		})
+	}
+	if len(candidates) == 0 {
+		out.Status = http.StatusBadGateway
+		out.Error = "upstream failed"
+		out.Body = errorBody(out.Error)
+		e.log(call, *out, nil)
+		return *out
+	}
+	question, _ := json.Marshal(call.Body["messages"])
+	body := map[string]any{
+		"model": call.Model,
+		"messages": []any{
+			map[string]any{"role": "system", "content": "You are the judge. Read the candidates and answer the user. Return only the answer."},
+			map[string]any{"role": "user", "content": []any{
+				map[string]any{"type": "text", "text": string(question)},
+				map[string]any{"type": "wowrouter_candidates", "candidates": candidates},
+			}},
+		},
+	}
+	out.Attempts++
+	status, payload, err := e.one(judgeLeaf, body)
+	if err != nil || status >= 400 {
+		return finish(firstLeaf, http.StatusOK, first)
+	}
+	return finish(judgeLeaf, status, payload)
 }
 
 func scrubHeaderMap(h map[string]string) {

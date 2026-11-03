@@ -39,7 +39,6 @@ type Resource struct {
 }
 
 type Store struct {
-	db          *sql.DB
 	mu          sync.Mutex
 	gen         int64
 	snap        *snapshot
@@ -50,6 +49,8 @@ type Store struct {
 	cacheLoaded bool
 	seal        []byte
 	oauthMu     sync.Mutex
+	driver      string
+	db          sqlDB
 }
 
 type snapshot struct {
@@ -82,7 +83,7 @@ func Open(path string) (*Store, string, error) {
 		return nil, "", err
 	}
 	db.SetMaxOpenConns(1)
-	s := &Store{db: db}
+	s := &Store{db: db, driver: "sqlite"}
 	if err := s.migrate(); err != nil {
 		db.Close()
 		return nil, "", err
@@ -193,7 +194,7 @@ func sqliteDSN(path string) (string, error) {
 }
 
 func (s *Store) migrate() error {
-	_, err := s.db.Exec(`
+	err := s.execScript(`
 CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS resources (
   collection TEXT NOT NULL,
@@ -210,7 +211,9 @@ CREATE TABLE IF NOT EXISTS resources (
 CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   hash TEXT NOT NULL,
-  expires_at TEXT NOT NULL
+  expires_at TEXT NOT NULL,
+  principal TEXT NOT NULL DEFAULT 'bootstrap',
+  role TEXT NOT NULL DEFAULT 'admin'
 );
 CREATE TABLE IF NOT EXISTS request_logs (
   id TEXT PRIMARY KEY,
@@ -267,10 +270,27 @@ CREATE TABLE IF NOT EXISTS prefs (
   principal TEXT PRIMARY KEY,
   payload TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS batches (
+  id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS eval_runs (
+  id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS a2a_tasks (
+  id TEXT PRIMARY KEY,
+  payload TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `)
 	if err != nil {
 		return err
 	}
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN principal TEXT NOT NULL DEFAULT 'bootstrap'`)
+	_, _ = s.db.Exec(`ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'`)
 	var gen int64
 	_ = s.db.QueryRow(`SELECT v FROM meta WHERE k = 'generation'`).Scan(&gen)
 	s.gen = gen
@@ -432,6 +452,9 @@ func (s *Store) Put(collection, name string, spec map[string]any, ifMatch string
 	}
 	once := asString(full["secret_once"])
 	delete(full, "secret_once")
+	if collection == "settings" && name == "auth" && localEnabled(full) && strings.TrimSpace(asString(full["password_hash"])) == "" {
+		return Resource{}, errPasswordRequired
+	}
 	publicAny, _ := redactTree(full).(map[string]any)
 	gen, err := s.bump()
 	if err != nil {
@@ -554,8 +577,48 @@ func (s *Store) CreateSession() (string, error) {
 		return "", err
 	}
 	exp := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339)
-	_, err = s.db.Exec(`INSERT INTO sessions(id, hash, expires_at) VALUES(?, ?, ?)`, shaHex(raw)[:16], shaHex(raw), exp)
+	_, err = s.db.Exec(`INSERT INTO sessions(id, hash, expires_at, principal, role) VALUES(?, ?, ?, ?, ?)`, shaHex(raw)[:16], shaHex(raw), exp, "bootstrap", "admin")
 	return raw, err
+}
+
+// CreateSessionFor starts a session for a console user.
+func (s *Store) CreateSessionFor(principal, role string) (string, error) {
+	if principal == "" {
+		principal = "bootstrap"
+	}
+	if role == "" {
+		role = "admin"
+	}
+	raw, err := randomToken("", 32)
+	if err != nil {
+		return "", err
+	}
+	exp := time.Now().Add(12 * time.Hour).UTC().Format(time.RFC3339)
+	_, err = s.db.Exec(`INSERT INTO sessions(id, hash, expires_at, principal, role) VALUES(?, ?, ?, ?, ?)`, shaHex(raw)[:16], shaHex(raw), exp, principal, role)
+	return raw, err
+}
+
+// SessionRole returns the signed-in principal. Missing role columns still count as an admin session.
+func (s *Store) SessionRole(raw string) (principal, role string, ok bool) {
+	if raw == "" {
+		return "", "", false
+	}
+	var exp, who, got string
+	err := s.db.QueryRow(`SELECT expires_at, principal, role FROM sessions WHERE hash = ?`, shaHex(raw)).Scan(&exp, &who, &got)
+	if err != nil {
+		return "", "", false
+	}
+	t, err := time.Parse(time.RFC3339, exp)
+	if err != nil || !t.After(time.Now()) {
+		return "", "", false
+	}
+	if got == "" {
+		got = "admin"
+	}
+	if who == "" {
+		who = "bootstrap"
+	}
+	return who, got, true
 }
 
 func (s *Store) SessionOK(raw string) bool {
@@ -1193,7 +1256,8 @@ func (s *Store) writeLog(rec map[string]any) {
 		rec["id"] = id
 	}
 	raw, _ := json.Marshal(rec)
-	_, _ = s.db.Exec(`INSERT OR REPLACE INTO request_logs(id, started_at, model, key_name, provider, status_code, payload) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+	_, _ = s.db.Exec(`INSERT INTO request_logs(id, started_at, model, key_name, provider, status_code, payload) VALUES(?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET started_at = excluded.started_at, model = excluded.model, key_name = excluded.key_name, provider = excluded.provider, status_code = excluded.status_code, payload = excluded.payload`,
 		id, asString(rec["started_at"]), asString(rec["model"]), asString(rec["key"]), asString(rec["provider"]), int(asFloat(rec["status_code"])), string(raw))
 }
 

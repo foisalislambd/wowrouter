@@ -3,13 +3,17 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
+	"time"
 
 	"wowrouter/server/internal/admin"
 	"wowrouter/server/internal/gateway"
+	"wowrouter/server/internal/metrics"
 	"wowrouter/server/internal/panelapi"
 )
 
@@ -28,6 +32,8 @@ func New(addr, dataDir string) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", s.health)
+	mux.HandleFunc("GET /ready", s.ready)
+	mux.HandleFunc("GET /metrics", s.metrics)
 	mux.HandleFunc("POST /api/shutdown", s.shutdown)
 	mux.HandleFunc("GET /v1/models", s.gatewayModels)
 	mux.HandleFunc("POST /v1/chat/completions", s.gatewayChat)
@@ -42,7 +48,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/batches", s.gatewayBatches)
 	mux.HandleFunc("GET /v1/batches/{id}", s.gatewayBatches)
 	mux.HandleFunc("POST /oauth/{provider}/start", s.oauthStart)
+	mux.HandleFunc("POST /oauth/{provider}/device", s.oauthDevice)
+	mux.HandleFunc("POST /oauth/{provider}/poll", s.oauthPoll)
 	mux.HandleFunc("GET /oauth/{provider}/callback", s.oauthCallback)
+	mux.HandleFunc("POST /v1/skills/{name}", s.skill)
+	mux.HandleFunc("POST /v1/a2a", s.a2a)
 	mux.HandleFunc("POST /v1/messages", s.gatewayAnthropic)
 	mux.HandleFunc("POST /v1beta/models/{model...}", s.gatewayGemini)
 	mux.HandleFunc("POST /model/{model}/converse", s.gatewayBedrock)
@@ -69,10 +79,30 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok", "service": "wowrouter"})
 }
 
-func (s *Server) shutdown(w http.ResponseWriter, _ *http.Request) {
+func (s *Server) ready(w http.ResponseWriter, _ *http.Request) {
+	if s.Admin == nil || s.Admin.Store == nil || s.Admin.Store.Ping() != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "not_ready", "service": "wowrouter"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready", "service": "wowrouter"})
+}
+
+func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
+	metrics.Handler(w, r)
+}
+
+func (s *Server) shutdown(w http.ResponseWriter, r *http.Request) {
 	if s.Stop == nil {
 		writeAPIError(w, http.StatusInternalServerError, "shutdown is not available")
 		return
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	ip := net.ParseIP(host)
+	if err != nil || ip == nil || !ip.IsLoopback() {
+		if s.Admin == nil || !s.Admin.Authorized(r) {
+			writeAPIError(w, http.StatusUnauthorized, "Sign in to shut the server down.")
+			return
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 	if flusher, ok := w.(http.Flusher); ok {
@@ -97,10 +127,51 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) (string, bool
 	}
 	key, ok := s.Admin.Store.AuthenticateKey(token)
 	if !ok {
+		s.Admin.Store.AddAudit(map[string]any{"action": "deny", "resource": "keys", "detail": "rejected api key"})
 		writeOpenAIError(w, http.StatusUnauthorized, "Incorrect API key.", "authentication_error", "invalid_api_key")
 		return "", false
 	}
+	role := str(key.Spec["role"])
+	if role == "" {
+		role = str(key.Private["role"])
+	}
+	if role == "viewer" && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		writeOpenAIError(w, http.StatusForbidden, "This key is read-only.", "permission_error", "insufficient_role")
+		return "", false
+	}
+	rpm := int(num(key.Spec["rpm"]))
+	if rpm <= 0 {
+		rpm = int(num(key.Private["rpm"]))
+	}
+	if rpm > 0 && !s.Admin.Store.AllowRate("key/"+key.Name, rpm, time.Minute) {
+		writeOpenAIError(w, http.StatusTooManyRequests, "This key is over its request limit.", "rate_limit_error", "rate_limited")
+		return "", false
+	}
+	quota := num(key.Spec["quota_usd"])
+	if quota <= 0 {
+		quota = num(key.Private["quota_usd"])
+	}
+	if quota > 0 && s.Admin.Store.SpendOf("usd/key/"+key.Name) >= quota {
+		writeOpenAIError(w, http.StatusTooManyRequests, "This key is over its quota.", "rate_limit_error", "quota")
+		return "", false
+	}
 	return "gw:" + key.Name, true
+}
+
+func num(v any) float64 {
+	switch t := v.(type) {
+	case float64:
+		return t
+	case int:
+		return float64(t)
+	case int64:
+		return float64(t)
+	case json.Number:
+		f, _ := t.Float64()
+		return f
+	default:
+		return 0
+	}
 }
 
 func (s *Server) callFromKey(keyID string, model string, body map[string]any, dialect string) gateway.Call {

@@ -216,12 +216,18 @@ func Order(strategy string, cands []Candidate, req Request) Result {
 			ranked[0], ranked[1] = ranked[1], ranked[0]
 		}
 		return failover(ranked)
-	case "auto/chaos", "fusion":
+	case "auto/chaos":
 		panel := shuffle(alive, req.Rand)
 		if len(panel) > 5 {
 			panel = panel[:5]
 		}
 		return Result{Attempts: ids(panel), Mode: "fanout"}
+	case "fusion":
+		panel := shuffle(alive, req.Rand)
+		if len(panel) > 5 {
+			panel = panel[:5]
+		}
+		return Result{Attempts: ids(panel), Mode: "judge"}
 	case "pipeline":
 		return Result{Attempts: ids(alive), Mode: "pipeline"}
 	default:

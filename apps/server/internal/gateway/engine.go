@@ -315,6 +315,9 @@ func (e *Engine) Handle(call Call) Outcome {
 	if comboMode == "fanout" {
 		return e.fanout(call, leaves, finish, &out)
 	}
+	if comboMode == "judge" {
+		return e.judge(call, leaves, finish, &out)
+	}
 	if comboMode == "pipeline" {
 		return e.pipeline(call, leaves, finish, &out)
 	}
@@ -446,6 +449,9 @@ func (e *Engine) charge(call Call, usd float64, tokens int) {
 		for _, b := range BudgetsOf(owner.level, owner.name, owner.spec) {
 			e.Cat.AddSpend(Bucket(b.Level, b.Owner, b.Name, b.Period, e.Now()), usd, tokens)
 		}
+	}
+	if call.KeyName != "" {
+		e.Cat.AddSpend("usd/key/"+call.KeyName, usd, tokens)
 	}
 }
 
@@ -729,23 +735,31 @@ func (e *Engine) Record(call Call, out Outcome) {
 
 // Dial resolves a model to the provider base URL, key, and upstream model id.
 func (e *Engine) Dial(model string) (baseURL, apiKey, upstream string, err error) {
+	_, baseURL, apiKey, upstream, err = e.DialProvider(model)
+	return baseURL, apiKey, upstream, err
+}
+
+// DialProvider is Dial plus the provider id, so callers can translate the body.
+func (e *Engine) DialProvider(model string) (provider, baseURL, apiKey, upstream string, err error) {
 	if combo.KnownModel(model) {
 		leaves, _, err := e.planCombo(Call{Model: model})
 		if err != nil || len(leaves) == 0 {
-			return "", "", "", fmt.Errorf("model not found")
+			return "", "", "", "", fmt.Errorf("model not found")
 		}
-		return e.dialLeaf(leaves[0])
+		baseURL, apiKey, upstream, err = e.dialLeaf(leaves[0])
+		return leaves[0].Provider, baseURL, apiKey, upstream, err
 	}
 	spec, ok := e.resolveModel(model)
 	if !ok {
-		return "", "", "", fmt.Errorf("model not found")
+		return "", "", "", "", fmt.Errorf("model not found")
 	}
 	tree, _ := e.tree(spec)
 	leaves, blocked := Plan(tree, e.Cat, Facts{Allow: e.Breakers.Allow})
 	if blocked || len(leaves) == 0 {
-		return "", "", "", fmt.Errorf("model not found")
+		return "", "", "", "", fmt.Errorf("model not found")
 	}
-	return e.dialLeaf(leaves[0])
+	baseURL, apiKey, upstream, err = e.dialLeaf(leaves[0])
+	return leaves[0].Provider, baseURL, apiKey, upstream, err
 }
 
 func (e *Engine) dialLeaf(leaf Leaf) (string, string, string, error) {

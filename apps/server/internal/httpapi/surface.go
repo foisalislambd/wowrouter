@@ -11,6 +11,7 @@ import (
 
 	"wowrouter/server/internal/gateway"
 	"wowrouter/server/internal/oauth"
+	"wowrouter/server/internal/search"
 	"wowrouter/server/internal/wire"
 )
 
@@ -100,26 +101,55 @@ func (s *Server) gatewaySearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := str(body["query"])
-	model := str(body["model"])
-	if query == "" || model == "" {
-		writeOpenAIError(w, http.StatusBadRequest, "query and model are required.", "invalid_request_error", "invalid_body")
+	if query == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "query is required.", "invalid_request_error", "invalid_body")
 		return
 	}
-	chat := map[string]any{
-		"model": model,
-		"messages": []any{
-			map[string]any{"role": "system", "content": "Answer as a search result. Return a short factual passage."},
-			map[string]any{"role": "user", "content": query},
-		},
+	provider := s.searchProvider(str(body["provider"]))
+	if provider.Name == "" {
+		writeOpenAIError(w, http.StatusBadRequest, "Add a brave, tavily, or searxng provider with an API key before searching.", "invalid_request_error", "search_not_configured")
+		return
 	}
-	encoded, _ := json.Marshal(chat)
-	s.dispatch(w, keyID, encoded, "search", model)
+	hits, err := search.Query(r.Context(), provider, query, nil)
+	if err != nil {
+		writeOpenAIError(w, http.StatusBadGateway, err.Error(), "server_error", "search_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"object": "search", "provider": provider.Name, "query": query, "results": hits})
+	_ = keyID
 }
 
-var (
-	batchMu sync.Mutex
-	batches = map[string]map[string]any{}
-)
+func (s *Server) searchProvider(name string) search.Provider {
+	if s.Admin == nil {
+		return search.Provider{}
+	}
+	order := []string{"tavily", "brave", "searxng"}
+	if name != "" {
+		order = []string{name}
+	}
+	for _, id := range order {
+		res, err := s.Admin.Store.Get("providers", id)
+		if err != nil {
+			continue
+		}
+		key := str(asMap(res.Private["auth"])["api_key"])
+		if key == "" {
+			key = str(asMap(res.Spec["auth"])["api_key"])
+		}
+		base := str(res.Private["base_url"])
+		if base == "" {
+			base = str(res.Spec["base_url"])
+		}
+		if key == "" && id != "searxng" {
+			continue
+		}
+		if id == "searxng" && base == "" {
+			continue
+		}
+		return search.Provider{Name: id, APIKey: key, Base: base}
+	}
+	return search.Provider{}
+}
 
 func (s *Server) gatewayBatches(w http.ResponseWriter, r *http.Request) {
 	keyID, ok := s.authorize(w, r)
@@ -128,20 +158,18 @@ func (s *Server) gatewayBatches(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodGet {
 		id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/v1/batches"), "/")
-		batchMu.Lock()
-		item := batches[id]
-		batchMu.Unlock()
 		if id == "" || id == "batches" {
 			var items []any
-			batchMu.Lock()
-			for _, item := range batches {
-				items = append(items, item)
+			if s.Admin != nil {
+				for _, item := range s.Admin.Store.Batches() {
+					items = append(items, item)
+				}
 			}
-			batchMu.Unlock()
 			writeJSON(w, http.StatusOK, map[string]any{"object": "list", "data": items})
 			return
 		}
-		if item == nil {
+		item, ok := s.Admin.Store.Batch(id)
+		if !ok {
 			writeOpenAIError(w, http.StatusNotFound, "No batch with that id.", "invalid_request_error", "not_found")
 			return
 		}
@@ -174,9 +202,9 @@ func (s *Server) gatewayBatches(w http.ResponseWriter, r *http.Request) {
 		"request_counts": map[string]any{"total": len(lines), "completed": len(lines), "failed": 0},
 		"output":         output,
 	}
-	batchMu.Lock()
-	batches[id] = item
-	batchMu.Unlock()
+	if s.Admin != nil {
+		_ = s.Admin.Store.SaveBatch(id, item)
+	}
 	writeJSON(w, http.StatusOK, item)
 }
 
@@ -200,12 +228,75 @@ func (s *Server) oauthStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("provider")
+	if p, ok := oauth.Catalog()[id]; ok && p.Flow == "cursor" {
+		authURL, state, err := oauth.StartCursor()
+		if err != nil {
+			writeAPIError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"authorization_url": authURL, "state": state, "flow": "cursor"})
+		return
+	}
+	if p, ok := oauth.Catalog()[id]; ok && p.Flow == "device" {
+		s.oauthDevice(w, r)
+		return
+	}
 	authURL, state, err := oauth.Start(id)
 	if err != nil {
 		writeAPIError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authorization_url": authURL, "state": state})
+	writeJSON(w, http.StatusOK, map[string]any{"authorization_url": authURL, "state": state, "flow": "pkce"})
+}
+
+func (s *Server) oauthDevice(w http.ResponseWriter, r *http.Request) {
+	if s.Admin == nil || !s.Admin.Authorized(r) {
+		writeAPIError(w, http.StatusUnauthorized, "Sign in to continue.")
+		return
+	}
+	code, err := oauth.StartDevice(r.Context(), r.PathValue("provider"), nil)
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"flow": "device", "device_code": code.DeviceCode, "user_code": code.UserCode,
+		"verification_uri": code.VerificationURI, "interval": code.Interval,
+	})
+}
+
+func (s *Server) oauthPoll(w http.ResponseWriter, r *http.Request) {
+	if s.Admin == nil || !s.Admin.Authorized(r) {
+		writeAPIError(w, http.StatusUnauthorized, "Sign in to continue.")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "The request body must be JSON.")
+		return
+	}
+	id := r.PathValue("provider")
+	var result oauth.Result
+	var pending string
+	var err error
+	if id == "cursor" {
+		result, pending, err = oauth.PollCursor(r.Context(), str(body["state"]), nil)
+	} else {
+		result, pending, err = oauth.PollDevice(r.Context(), id, str(body["device_code"]), nil)
+	}
+	if err != nil {
+		writeAPIError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if pending != "" {
+		writeJSON(w, http.StatusAccepted, map[string]any{"pending": pending})
+		return
+	}
+	if err := s.Admin.Store.SaveOAuth(id, result.AccessToken, result.RefreshToken, result.ExpiresAt); err != nil {
+		writeAPIError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "provider": id, "expires_at": result.ExpiresAt})
 }
 
 func (s *Server) oauthCallback(w http.ResponseWriter, r *http.Request) {

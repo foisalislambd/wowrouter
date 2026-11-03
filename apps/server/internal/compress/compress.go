@@ -10,13 +10,14 @@
 package compress
 
 import (
+	"encoding/json"
 	"regexp"
 	"strings"
 )
 
 // Engines reports what this build can run.
 func Engines() []string {
-	return []string{"lite", "dedup", "rtk", "relevance", "caveman"}
+	return []string{"lite", "dedup", "rtk", "relevance", "caveman", "jsonmin", "budget"}
 }
 
 // NotImplemented is the honest list of engines this build does not run.
@@ -32,7 +33,7 @@ func Profile(name string) []string {
 	case "standard":
 		return []string{"lite", "dedup", "caveman"}
 	case "aggressive":
-		return []string{"lite", "dedup", "rtk", "relevance", "caveman"}
+		return []string{"lite", "dedup", "rtk", "relevance", "caveman", "jsonmin", "budget"}
 	case "rtk":
 		return []string{"lite", "rtk"}
 	case "off", "":
@@ -78,9 +79,38 @@ func run(name, text, query string) string {
 		return relevance(text, query)
 	case "caveman":
 		return caveman(text)
+	case "jsonmin":
+		return jsonMin(text)
+	case "budget":
+		return budget(text, 1200)
 	default:
 		return text
 	}
+}
+
+func jsonMin(text string) string {
+	trim := strings.TrimSpace(text)
+	if !strings.HasPrefix(trim, "{") && !strings.HasPrefix(trim, "[") {
+		return text
+	}
+	var v any
+	if json.Unmarshal([]byte(trim), &v) != nil {
+		return text
+	}
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return text
+	}
+	return string(raw)
+}
+
+func budget(text string, max int) string {
+	if len(text) <= max || strings.Contains(text, holeMark) {
+		return text
+	}
+	head := max * 2 / 3
+	tail := max - head
+	return text[:head] + "\n… trimmed to budget …\n" + text[len(text)-tail:]
 }
 
 func lite(text string) string {

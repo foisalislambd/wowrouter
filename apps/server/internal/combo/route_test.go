@@ -133,7 +133,7 @@ func TestLKGPSticks(t *testing.T) {
 
 func TestFusionIsAPanel(t *testing.T) {
 	got := Order("fusion", cands(), Request{Rand: 0.2})
-	if got.Mode != "fanout" || len(got.Attempts) != 3 {
+	if got.Mode != "judge" || len(got.Attempts) != 3 {
 		t.Fatalf("%+v", got)
 	}
 	got = Order("pipeline", cands(), Request{})

@@ -80,7 +80,7 @@ func TestOffIsIdentity(t *testing.T) {
 	if got, ran := Apply("off", "hello", ""); got != "hello" || ran != nil {
 		t.Fatalf("%q %v", got, ran)
 	}
-	if len(Engines()) != 5 || len(NotImplemented()) < 4 {
+	if len(Engines()) != 7 || len(NotImplemented()) < 4 {
 		t.Fatal("engine lists")
 	}
 }

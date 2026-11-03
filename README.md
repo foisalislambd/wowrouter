@@ -1,8 +1,8 @@
 # WowRouter
 
-WowRouter is a local AI router. It runs on your computer, keeps provider keys in a local database, and gives Cursor and other tools one OpenAI-compatible address.
+WowRouter is an AI router. On a laptop it listens on `http://127.0.0.1:8787`. The same binary runs on a VPS, in Docker, or in Kubernetes. A non-loopback address does not start until password sign-in is enabled or you explicitly opt in to token-only access with `WOWROUTER_PUBLIC_BIND=token`.
 
-The router listens only on this machine, at `http://127.0.0.1:8787`. Nothing in the app is written to be reached from another computer.
+Deployment, TLS, Postgres, proxies, and Helm are in [docs/deploy.md](docs/deploy.md).
 
 | What you open | Address |
 | --- | --- |
@@ -182,9 +182,9 @@ That folder holds `wowrouter.db`, `secret.key`, `bootstrap-token`, and, for the 
 
 Deleting the folder removes keys, logs, and settings. Keep a copy of `secret.key` with the database if you move the folder. One without the other cannot decrypt provider keys.
 
-The server rejects a listen address that is not a loopback address (`127.0.0.1`, `localhost`, or `::1`).
+The default listen address is loopback (`127.0.0.1:8787`). Set `-addr` or `WOWROUTER_ADDR` to bind elsewhere. A public bind requires password sign-in, or `WOWROUTER_PUBLIC_BIND=token` if you accept the bootstrap token as the admin credential. See [docs/deploy.md](docs/deploy.md).
 
-Sign-in is the bootstrap token printed on first start. Password sign-in is off until you turn it on under **Settings → Sign-in & SSO**, set a password of at least 12 characters, and save. The password is stored as a bcrypt hash. The bootstrap token still works. Provider secrets in the database are encrypted with the key in `secret.key`.
+Sign-in is the bootstrap token printed on first start. Password sign-in is off until you turn it on under **Settings → Sign-in & sessions**, set a password of at least 12 characters, and save. The password switch in the policy form cannot turn password sign-in on by itself. The password is stored as a bcrypt hash. The bootstrap token still works. Additional users are created with `POST /admin/v1/users`. Provider secrets in the database are encrypted with the key in `secret.key`. SQLite is the default database. `WOWROUTER_DATABASE_URL=postgres://...` uses Postgres.
 
 An optional loopback TLS proxy can be started from `POST /admin/v1/runtime/mitm` with `{"enabled":true}`. It listens on `127.0.0.1:8790`, does not install a CA for you, and stays off until that call. Trust `ca_pem` from `GET /admin/v1/runtime/mitm` yourself if a client must accept the proxy certificate.
 

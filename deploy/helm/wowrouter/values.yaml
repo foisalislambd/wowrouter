@@ -1,0 +1,17 @@
+replicaCount: 1
+image:
+  repository: foisalislambd/wowrouter
+  tag: latest
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  port: 8787
+adminPassword: ""
+# token lets the chart start with the bootstrap token. Clear this and set
+# adminPassword before exposing the service outside the cluster.
+publicBind: "token"
+databaseUrl: ""
+dataDir: /data
+persistence:
+  size: 1Gi
+resources: {}

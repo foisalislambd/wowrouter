@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
+	"wowrouter/server/internal/edge"
 )
 
 const minPasswordLen = 12
@@ -47,6 +48,12 @@ func (l *loginLimit) reset(key string) {
 }
 
 // PasswordLogin reports whether email-and-password sign-in is turned on and a hash is stored.
+func localEnabled(spec map[string]any) bool {
+	admin := asMap(spec["admin"])
+	local := asMap(admin["local"])
+	return local["enabled"] == true
+}
+
 func (s *Store) PasswordLogin() (enabled bool, email string, hash string) {
 	res, err := s.Get("settings", "auth")
 	if err != nil {
@@ -162,7 +169,7 @@ func (a *API) passwordSettings(w http.ResponseWriter, r *http.Request) {
 func (a *API) loginOptions(w http.ResponseWriter, _ *http.Request) {
 	methods := []any{map[string]any{"type": "token", "id": "token", "display_name": "Admin token"}}
 	enabled, _, hash := a.Store.PasswordLogin()
-	passwordOn := enabled && hash != ""
+	passwordOn := (enabled && hash != "") || len(a.Store.Resources("users")) > 0
 	if passwordOn {
 		methods = append([]any{map[string]any{"type": "local", "id": "local", "display_name": "Password"}}, methods...)
 	}
@@ -228,18 +235,27 @@ func (a *API) localLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusTooManyRequests, "rate_limited", "Too many attempts. Wait a few minutes, then try again.")
 		return
 	}
+	if a.Store.CheckPassword(email, password) {
+		passwordAttempts.reset(ip)
+		a.writeSession(w, "bootstrap", "admin")
+		return
+	}
+	if _, role, ok := a.Store.CheckUser(email, password); ok {
+		passwordAttempts.reset(ip)
+		a.writeSession(w, email, role)
+		return
+	}
 	enabled, _, hash := a.Store.PasswordLogin()
-	if !enabled || hash == "" {
+	if (!enabled || hash == "") && len(a.Store.Resources("users")) == 0 {
 		writeErr(w, http.StatusForbidden, "local_login_disabled", "Password sign-in is turned off.")
 		return
 	}
-	if !a.Store.CheckPassword(email, password) {
-		passwordAttempts.fail(ip)
-		writeErr(w, http.StatusUnauthorized, "unauthenticated", "That email or password didn't work.")
-		return
-	}
-	passwordAttempts.reset(ip)
-	token, err := a.Store.CreateSession()
+	passwordAttempts.fail(ip)
+	writeErr(w, http.StatusUnauthorized, "unauthenticated", "That email or password didn't work.")
+}
+
+func (a *API) writeSession(w http.ResponseWriter, principal, role string) {
+	token, err := a.Store.CreateSessionFor(principal, role)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal", err.Error())
 		return
@@ -249,6 +265,9 @@ func (a *API) localLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func clientIP(r *http.Request) string {
+	if ip := edge.ClientIP(r); ip != "" && ip != r.RemoteAddr {
+		return ip
+	}
 	host := r.RemoteAddr
 	if i := strings.LastIndex(host, ":"); i > 0 {
 		host = host[:i]

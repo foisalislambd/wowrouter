@@ -9,6 +9,7 @@ import (
 
 	"wowrouter/server/internal/combo"
 	"wowrouter/server/internal/gateway"
+	"wowrouter/server/internal/wire"
 )
 
 func (s *Server) gatewayModels(w http.ResponseWriter, r *http.Request) {
@@ -108,12 +109,21 @@ func (s *Server) forwardKind(w http.ResponseWriter, r *http.Request, suffix stri
 		writeOpenAIError(w, http.StatusNotFound, "The model `"+model+"` does not exist.", "invalid_request_error", "model_not_found")
 		return
 	}
-	base, apiKey, upstream, err := s.Admin.Engine.Dial(model)
+	provider, base, apiKey, upstream, err := s.Admin.Engine.DialProvider(model)
 	if err != nil {
 		writeOpenAIError(w, http.StatusNotFound, "The model `"+model+"` does not exist.", "invalid_request_error", "model_not_found")
 		return
 	}
 	body["model"] = upstream
+	var restore func([]byte) []byte
+	switch suffix {
+	case "/embeddings":
+		body, restore = wire.PrepareEmbeddings(provider, body)
+	case "/audio/speech":
+		body = wire.PrepareSpeech(provider, body)
+	case "/moderations":
+		body, restore = wire.PrepareModeration(provider, body)
+	}
 	payload, _ := json.Marshal(body)
 	endpoint := gateway.JoinUpstream(base, suffix)
 	if err := gateway.SafeHTTPURL(endpoint); err != nil {
@@ -135,8 +145,12 @@ func (s *Server) forwardKind(w http.ResponseWriter, r *http.Request, suffix stri
 		return
 	}
 	defer resp.Body.Close()
+	rawBody, _ := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
+	if restore != nil && resp.StatusCode < 300 {
+		rawBody = restore(rawBody)
+	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, io.LimitReader(resp.Body, 20<<20))
+	_, _ = w.Write(rawBody)
 	_ = keyID
 }

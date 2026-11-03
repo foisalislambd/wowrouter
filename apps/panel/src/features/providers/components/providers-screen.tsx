@@ -32,6 +32,7 @@ import { useProviders } from '../store';
 import { ageText, type KeyTest, latestTest, providerKeyStatus, rotation, servedRequests } from '../keys';
 import { testFailure, testSummary } from '../test-result';
 import { AddProviderDrawer } from './add-provider-drawer';
+import { OAuthCard } from './oauth-card';
 import { ProviderDrawer } from './provider-drawer';
 import { TestConnection, testGateReason, type TestState } from './test-connection';
 
@@ -249,6 +250,7 @@ export function ProvidersScreen() {
           </Gate>
         }
       />
+      <OAuthCard />
       <div className="flex flex-col">
         <Panel
           flush

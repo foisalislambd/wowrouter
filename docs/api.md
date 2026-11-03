@@ -35,6 +35,14 @@ Streaming works the same way as OpenAI: set `"stream": true`. Tools, tool result
 
 Codex and other Responses clients use `POST /v1/responses`. The body uses `input` and `instructions`. The router turns that into a chat request and returns a Responses object, including streamed `response.output_text.delta` events. A chat call may send `Idempotency-Key`. The same key returns the stored response for five minutes, including after a restart, for bodies up to 1 MiB.
 
+`GET /health` is liveness. `GET /ready` checks the database. `GET /metrics` is Prometheus text.
+
+`POST /v1/search` calls a saved `brave`, `tavily`, or `searxng` provider. `POST /v1/batches` stores the batch in the database. `POST /v1/skills/{name}` runs a saved skill. `POST /v1/a2a` is the task server (`tasks/send`, `tasks/get`, `tasks/cancel`). `POST /v1/mcp` is the MCP server, including a `chat` tool.
+
+Embeddings, speech, and moderations aimed at Gemini are translated. Other providers receive the OpenAI body.
+
+A fusion combo asks the first deployment to judge the others. A pipeline passes each stage's raw response along with the text.
+
 ```bash
 curl http://127.0.0.1:8787/v1/responses \
   -H "Authorization: Bearer sk-wowrouter-..." \

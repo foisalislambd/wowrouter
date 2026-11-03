@@ -392,7 +392,13 @@ function PolicyForm({
           <Switch
             checked={values.local}
             disabled={disabled}
-            onChange={(v) => set('local', v)}
+            onChange={(v) => {
+              if (v) {
+                notify('error', 'Set a password first', 'Use the console password card. Turning this on without a password is ignored.');
+                return;
+              }
+              set('local', false);
+            }}
             label="Let people sign in with an email and password"
           />
           <p className="text-caption text-muted">

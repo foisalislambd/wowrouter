@@ -11,10 +11,12 @@ import (
 	"strings"
 	"time"
 
+	"wowrouter/server/internal/acp"
 	"wowrouter/server/internal/clients"
 	"wowrouter/server/internal/combo"
 	"wowrouter/server/internal/compress"
 	"wowrouter/server/internal/presets"
+	"wowrouter/server/internal/tunnel"
 )
 
 // Run executes a subcommand. args[0] is the command name.
@@ -90,6 +92,23 @@ func Run(args []string) int {
 	case "connect":
 		fmt.Printf("url %s\n", base)
 		return doctor(base)
+	case "acp":
+		if err := acp.Run(os.Stdin, os.Stdout, base, token); err != nil {
+			fmt.Println(err)
+			return 1
+		}
+		return 0
+	case "relay":
+		addr := "127.0.0.1:8791"
+		if len(args) > 1 {
+			addr = args[1]
+		}
+		if token == "" {
+			fmt.Println("set WOWROUTER_TOKEN to the tunnel bearer token")
+			return 2
+		}
+		fmt.Println("relay", addr)
+		return relay(addr, token)
 	case "chat":
 		if len(args) < 3 {
 			fmt.Println("usage: wowrouter chat <model> <prompt>")
@@ -114,6 +133,8 @@ func usage() {
   strategies
   compress
   configure <claude|codex|cursor|cline|opencode|copilot>
+  acp
+  relay [addr]
   chat <model> <prompt>
 
 Remote mode uses WOWROUTER_URL and WOWROUTER_TOKEN.`)
@@ -131,6 +152,14 @@ func tokenOr(token string) string {
 		return token
 	}
 	return "sk-wowrouter-YOUR-KEY"
+}
+
+func relay(addr, token string) int {
+	if err := http.ListenAndServe(addr, tunnel.Handler(token)); err != nil {
+		fmt.Println(err)
+		return 1
+	}
+	return 0
 }
 
 func doctor(base string) int {

@@ -30,7 +30,7 @@ Anthropic rate-limit headers (`anthropic-ratelimit-*-remaining`) update the quot
 
 ## Subscription login
 
-`POST /oauth/claude/start`, `POST /oauth/codex/start`, and `POST /oauth/github/start` (console session required) return an authorization URL. The browser returns to `GET /oauth/{provider}/callback`, which stores the access token as that provider's key. Client ids are the public PKCE ids and can be overridden with `WOWROUTER_OAUTH_CLAUDE_CLIENT_ID`, `WOWROUTER_OAUTH_CODEX_CLIENT_ID`, and `WOWROUTER_OAUTH_GITHUB_CLIENT_ID`. The refresh token stays in the encrypted provider record. When it is within a minute of expiry, the next call refreshes it and stores the new access token.
+Subscription sign-in is on the Providers page. `POST /oauth/{provider}/start` (console session required) begins PKCE, a device code, or Cursor's deep-control login. Device-code providers are `github-copilot`, `gemini`, and `kiro`. PKCE providers are `claude`, `codex`, `github`, `antigravity`, and `cline`. `POST /oauth/{provider}/poll` finishes a device or Cursor login. Client ids that are not public defaults come from `WOWROUTER_OAUTH_GEMINI_CLIENT_ID`, `WOWROUTER_OAUTH_ANTIGRAVITY_CLIENT_ID`, `WOWROUTER_OAUTH_ANTIGRAVITY_CLIENT_SECRET`, and `WOWROUTER_OAUTH_CLINE_CLIENT_ID`. The refresh token stays in the encrypted provider record. When it is within a minute of expiry, the next call refreshes it and stores the new access token.
 
 Priority `0` is first in fill-first order. A new account is added after the ones you already have. If the provider is on and it needs a key, the last remaining account cannot be removed until you turn the provider off.
 

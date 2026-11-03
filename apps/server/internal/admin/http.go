@@ -24,7 +24,28 @@ func (a *API) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "unauthenticated", "Sign in to continue.")
 		return
 	}
+	if !a.public(path) && !a.allowRole(r) {
+		writeErr(w, http.StatusForbidden, "forbidden", "This session cannot change that.")
+		return
+	}
 	a.route(w, r, path)
+}
+
+func (a *API) allowRole(r *http.Request) bool {
+	role := "admin"
+	if c, err := r.Cookie("wowrouter_session"); err == nil {
+		if _, got, ok := a.Store.SessionRole(c.Value); ok {
+			role = got
+		}
+	}
+	if role == "" || role == "admin" || role == "operator" {
+		return true
+	}
+	if r.Method == http.MethodGet || r.Method == http.MethodHead {
+		return true
+	}
+	path := strings.Trim(strings.TrimPrefix(r.URL.Path, "/admin/v1"), "/")
+	return path == "auth/logout"
 }
 
 func (a *API) public(path string) bool {
@@ -65,6 +86,14 @@ func (a *API) route(w http.ResponseWriter, r *http.Request, path string) {
 		a.localLogin(w, r)
 	case path == "auth/password" && (r.Method == http.MethodGet || r.Method == http.MethodPut || r.Method == http.MethodPost):
 		a.passwordSettings(w, r)
+	case path == "oauth/catalog" && r.Method == http.MethodGet:
+		a.oauthCatalog(w, r)
+	case path == "users" && (r.Method == http.MethodGet || r.Method == http.MethodPost):
+		a.users(w, r)
+	case path == "evals" && (r.Method == http.MethodGet || r.Method == http.MethodPost):
+		a.evals(w, r)
+	case path == "sync/snapshot" && (r.Method == http.MethodGet || r.Method == http.MethodPut):
+		a.syncSnapshot(w, r)
 	case path == "auth/logout" && r.Method == http.MethodPost:
 		if c, err := r.Cookie("wowrouter_session"); err == nil {
 			a.Store.DeleteSession(c.Value)
@@ -425,6 +454,10 @@ func (a *API) settings(w http.ResponseWriter, r *http.Request, name string) {
 		res, err := a.Store.Put("settings", name, spec, r.Header.Get("If-Match"), r.Method == http.MethodPatch)
 		if errors.Is(err, ErrPrecondition) {
 			writeErr(w, http.StatusPreconditionFailed, "precondition_failed", "It changed since you read it. Reload to see the current version.")
+			return
+		}
+		if errors.Is(err, errPasswordRequired) {
+			writeErr(w, http.StatusBadRequest, "password_required", "Set a password in the console password card before turning password sign-in on.")
 			return
 		}
 		if err != nil {
