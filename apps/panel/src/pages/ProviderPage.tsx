@@ -10,7 +10,9 @@ import {
   listAccounts,
   listProviderModels,
   loadProviderModels,
+  pollDeviceLogin,
   setModelActive,
+  startDeviceLogin,
   testProvider,
   updateAccount,
   updateProvider,
@@ -46,6 +48,8 @@ export default function ProviderPage() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
+  const [clientId, setClientId] = useState("");
+  const [device, setDevice] = useState<{ userCode: string; verificationUri: string } | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
 
@@ -188,7 +192,11 @@ export default function ProviderPage() {
     setNotice("");
     try {
       const result = await testProvider(slug, { baseUrl, accountId: accounts.find((account) => account.enabled)?.id });
-      setNotice(`Key works. OpenAI listed ${result.upstreamModels} models.`);
+      setNotice(
+        typeof result.upstreamModels === "number"
+          ? `Key works. The provider listed ${result.upstreamModels} models.`
+          : "The provider answered.",
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connection failed");
     } finally {
@@ -213,9 +221,45 @@ export default function ProviderPage() {
     }
   }
 
+  async function signIn() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const started = await startDeviceLogin(slug, clientId.trim());
+      setDevice({ userCode: started.userCode, verificationUri: started.verificationUri });
+      setNotice("Open the verification page, enter the code, then choose I've signed in.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start sign-in");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function finishSignIn() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await pollDeviceLogin(slug);
+      if (result.pending) {
+        setNotice("Still waiting for approval. Finish the code in the browser, then try again.");
+        return;
+      }
+      setDevice(null);
+      setProvider(await getProvider(slug));
+      setAccounts((await listAccounts(slug)).accounts);
+      setNotice("Signed in. The access token is encrypted on this computer.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Sign-in did not finish");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function addAccount() {
     if (!accountKey.trim()) {
-      setError(provider?.category === "Web Cookie" ? "Paste a session cookie." : "Paste an API key.");
+      setError(credentialLabel(provider) === "API key" ? "Paste an API key." : `Paste a ${credentialLabel(provider).toLowerCase()}.`);
       return;
     }
     setBusy(true);
@@ -323,6 +367,12 @@ export default function ProviderPage() {
           ) : null
         }
       />
+      {provider?.summary && (
+        <p className="mb-4 max-w-3xl text-sm text-gray-600 dark:text-gray-300">{provider.summary}</p>
+      )}
+      {provider && unofficial(provider) && (
+        <p className="mb-4 text-xs font-medium tracking-wide text-amber-700 uppercase dark:text-amber-300">Unofficial / experimental</p>
+      )}
       {error && <p className="mb-4 text-sm text-error-500">{error}</p>}
       {notice && <p className="mb-4 text-sm text-success-600">{notice}</p>}
 
@@ -359,11 +409,73 @@ export default function ProviderPage() {
           <button type="button" onClick={test} disabled={busy} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
             Test connection
           </button>
-          <button type="button" onClick={loadModels} disabled={busy} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
-            Load models
-          </button>
+          {canLoadModels(provider?.protocol) && (
+            <button type="button" onClick={loadModels} disabled={busy} className="rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
+              Load models
+            </button>
+          )}
         </div>
       </section>
+
+      {provider?.protocol === "oauth_device" && (
+        <section className="panel-card panel-card-body mt-6">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Sign in with GitHub</h2>
+          <p className="mt-2 max-w-3xl text-sm text-gray-600 dark:text-gray-300">
+            Save the enterprise base URL first. Enter the OAuth app client id you created for this machine, then start device sign-in. WowRouter does not ship a shared client id.
+          </p>
+          <div className="mt-4 flex flex-wrap items-end gap-3">
+            <label className="block min-w-64 flex-1 text-sm">
+              <span className="font-medium text-gray-700 dark:text-gray-200">OAuth client id</span>
+              <input
+                value={clientId}
+                onChange={(event) => setClientId(event.target.value)}
+                placeholder="Iv1.…"
+                autoComplete="off"
+                className="mt-1.5 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-mono text-sm text-gray-900 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white"
+              />
+            </label>
+            <button type="button" onClick={signIn} disabled={busy} className="h-10 rounded-lg bg-brand-500 px-3 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60">
+              Sign in with GitHub
+            </button>
+          </div>
+          {device && (
+            <div className="mt-4 rounded-lg border border-gray-200 p-3 text-sm dark:border-gray-700">
+              <p className="text-gray-600 dark:text-gray-300">
+                Open{" "}
+                <a href={device.verificationUri} target="_blank" rel="noreferrer" className="font-medium text-brand-600 hover:underline">
+                  {device.verificationUri}
+                </a>{" "}
+                and enter this code:
+              </p>
+              <p className="mt-2 font-mono text-lg tracking-widest text-gray-900 dark:text-white">{device.userCode}</p>
+              <button type="button" onClick={finishSignIn} disabled={busy} className="mt-3 rounded-lg border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-white/5">
+                I've signed in
+              </button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {provider?.protocol === "session_token" && (
+        <section className="panel-card panel-card-body mt-6">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Paste an access token</h2>
+          <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm text-gray-600 dark:text-gray-300">
+            <li>Sign in at copilot.microsoft.com in your browser.</li>
+            <li>Open DevTools, then Network, and pick a chat request.</li>
+            <li>Copy only the value after Bearer in the Authorization header.</li>
+            <li>Paste that token below. Leave the Cookie header alone. The token is encrypted on this computer.</li>
+          </ol>
+        </section>
+      )}
+
+      {provider?.protocol === "unsupported" && provider.category === "Web Cookie" && (
+        <section className="panel-card panel-card-body mt-6">
+          <h2 className="text-sm font-semibold text-gray-900 dark:text-white">No stable session API</h2>
+          <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">
+            This site expects a browser session, a captcha, or a private websocket. A pasted cookie does not make chat reliable, so WowRouter leaves it unsupported.
+          </p>
+        </section>
+      )}
 
       <section className="panel-card panel-card-body mt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -433,14 +545,12 @@ export default function ProviderPage() {
             />
           </label>
           <label className="block text-sm">
-            <span className="font-medium text-gray-700 dark:text-gray-200">
-              {provider?.category === "Web Cookie" ? "Session cookie" : "API key"}
-            </span>
+            <span className="font-medium text-gray-700 dark:text-gray-200">{credentialLabel(provider)}</span>
             <input
               type="password"
               value={accountKey}
               onChange={(event) => setAccountKey(event.target.value)}
-              placeholder={provider?.category === "Web Cookie" ? "Paste the session cookie" : "sk-..."}
+              placeholder={credentialPlaceholder(provider)}
               autoComplete="off"
               className="mt-1.5 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 font-mono text-sm text-gray-900 outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white"
             />
@@ -569,6 +679,30 @@ export default function ProviderPage() {
       </section>
     </div>
   );
+}
+
+function unofficial(provider: Provider) {
+  return provider.protocol === "session_token" || provider.protocol === "duck_chat" || provider.summary.startsWith("Unofficial");
+}
+
+function canLoadModels(protocol: string | undefined) {
+  return protocol === "openai_chat" || protocol === "anthropic" || protocol === "gemini" || protocol === "ollama_chat" || protocol === "cohere_chat";
+}
+
+function credentialLabel(provider: Provider | null) {
+  if (provider?.protocol === "session_token") return "Access token";
+  if (provider?.slug === "sap-ai-core") return "Service key JSON";
+  if (provider?.slug === "bedrock") return "AWS access key";
+  if (provider?.category === "Web Cookie") return "Session cookie";
+  return "API key";
+}
+
+function credentialPlaceholder(provider: Provider | null) {
+  if (provider?.protocol === "session_token") return "Paste the bearer token";
+  if (provider?.slug === "sap-ai-core") return '{"clientid":"…","clientsecret":"…","url":"…"}';
+  if (provider?.slug === "bedrock") return "accessKeyId:secretAccessKey";
+  if (provider?.category === "Web Cookie") return "Paste the session cookie";
+  return "sk-...";
 }
 
 function modelNote(description: string) {

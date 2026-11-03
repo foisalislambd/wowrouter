@@ -210,7 +210,7 @@ export default function ProvidersPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <h2 className="truncate text-base font-semibold text-gray-900 dark:text-white">{provider.displayName}</h2>
-                    <Status ready={provider.enabled && (provider.hasApiKey || provider.keyOptional)} />
+                    <Status provider={provider} />
                   </div>
                   <p className="mt-1 line-clamp-2 min-h-10 text-sm leading-5 text-gray-500 dark:text-gray-400">
                     {provider.summary}
@@ -249,16 +249,21 @@ function appendUnique(current: Provider[], next: Provider[]) {
   return added.length === 0 ? current : [...current, ...added];
 }
 
-function Status({ ready }: { ready: boolean }) {
+function Status({ provider }: { provider: Provider }) {
+  const unsupported = provider.protocol === "unsupported";
+  const ready = !unsupported && provider.enabled && (provider.hasApiKey || provider.keyOptional);
+  const label = unsupported ? "Unsupported" : ready ? "Ready" : "Setup";
   return (
     <span
       className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
         ready
           ? "bg-success-50 text-success-600 dark:bg-success-500/10"
-          : "bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300"
+          : unsupported
+            ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300"
+            : "bg-gray-100 text-gray-600 dark:bg-white/10 dark:text-gray-300"
       }`}
     >
-      {ready ? "Ready" : "Setup"}
+      {label}
     </span>
   );
 }

@@ -174,8 +174,22 @@ export function deleteAccount(slug: string, id: string) {
   return request<void>(`/api/providers/${slug}/accounts/${id}`, { method: "DELETE" })
 }
 
+export function startDeviceLogin(slug: string, clientId: string) {
+  return request<{ userCode: string; verificationUri: string; interval: number }>(`/api/providers/${slug}/oauth/device`, {
+    method: "POST",
+    body: JSON.stringify({ clientId }),
+  })
+}
+
+export function pollDeviceLogin(slug: string) {
+  return request<{ pending: boolean; saved?: boolean }>(`/api/providers/${slug}/oauth/poll`, {
+    method: "POST",
+    body: JSON.stringify({}),
+  })
+}
+
 export function testProvider(slug: string, body: { apiKey?: string; baseUrl?: string; accountId?: string }) {
-  return request<{ ok: boolean; upstreamModels: number }>(`/api/providers/${slug}/test`, {
+  return request<{ ok: boolean; upstreamModels?: number; status?: number }>(`/api/providers/${slug}/test`, {
     method: "POST",
     body: JSON.stringify(body),
   })

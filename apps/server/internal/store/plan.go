@@ -225,9 +225,11 @@ WHERE m.active = 1 AND p.enabled = 1
   AND TRIM(p.base_url) != ''
   AND (p.api_key_cipher != '' OR p.key_optional = 1)
   AND (m.kind = '' OR m.kind = ?)
-  AND p.protocol IN (?, ?, ?, ?, ?)`,
+  AND p.protocol IN (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		catalog.KindChat,
-		catalog.ProtocolOpenAIChat, catalog.ProtocolAnthropic, catalog.ProtocolGemini, catalog.ProtocolOllama, catalog.ProtocolCohere)
+		catalog.ProtocolOpenAIChat, catalog.ProtocolAnthropic, catalog.ProtocolGemini, catalog.ProtocolOllama, catalog.ProtocolCohere,
+		catalog.ProtocolGitLab, catalog.ProtocolBedrock, catalog.ProtocolSAP, catalog.ProtocolClova, catalog.ProtocolCloudAgent,
+		catalog.ProtocolDuck, catalog.ProtocolOAuthDevice, catalog.ProtocolSession)
 	if err != nil {
 		return nil, err
 	}
