@@ -57,7 +57,25 @@ const (
 
 func All() []Provider {
 	providers := append(append([]Provider{OpenAI()}, generatedProviders()...), decisionProviders()...)
-	return append(providers, nocostProviders()...)
+	providers = append(providers, nocostProviders()...)
+	return mergeExtra(providers)
+}
+
+// mergeExtra appends hand-maintained providers. A generated slug always wins,
+// so regenerating the catalog does not wipe or duplicate these entries.
+func mergeExtra(providers []Provider) []Provider {
+	seen := make(map[string]bool, len(providers))
+	for _, provider := range providers {
+		seen[provider.Slug] = true
+	}
+	for _, provider := range extraProviders() {
+		if seen[provider.Slug] {
+			continue
+		}
+		seen[provider.Slug] = true
+		providers = append(providers, provider)
+	}
+	return providers
 }
 
 // KindFromID guesses a model kind from an upstream id returned by a model list.

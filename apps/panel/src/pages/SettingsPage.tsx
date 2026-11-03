@@ -1,5 +1,5 @@
 import { PanelPageHeader } from "@/components/layout/panel-page-header";
-import { clearActivity, getDesktop, getSession, getSettings, saveDesktop, savePanelAuth } from "@/lib/api";
+import { clearActivity, getDesktop, getSession, getSettings, saveDesktop, saveFeatures, saveOIDC, savePanelAuth, type Features } from "@/lib/api";
 import { useEffect, useState } from "react";
 
 export default function SettingsPage() {
@@ -15,6 +15,12 @@ export default function SettingsPage() {
   const [confirm, setConfirm] = useState("");
   const [currentPassword, setCurrentPassword] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  const [features, setFeatures] = useState<Features>({ compression: "off", cache: false, cacheTtl: 300, memory: false });
+  const [oidcOn, setOidcOn] = useState(false);
+  const [issuer, setIssuer] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const [redirectUrl, setRedirectUrl] = useState("");
 
   useEffect(() => {
     getSettings()
@@ -22,6 +28,13 @@ export default function SettingsPage() {
         setDataDir(result.dataDir);
         setAddress(result.address);
         setLogCount(result.logCount);
+        if (result.features) setFeatures(result.features);
+        if (result.oidc) {
+          setOidcOn(result.oidc.enabled);
+          setIssuer(result.oidc.issuer || "");
+          setClientId(result.oidc.clientId || "");
+        }
+        setRedirectUrl(result.redirectUrl || "");
       })
       .catch((err: Error) => setError(err.message));
     getDesktop()
@@ -31,7 +44,7 @@ export default function SettingsPage() {
       })
       .catch((err: Error) => setError(err.message));
     getSession()
-      .then((result) => setAuthOn(result.authRequired))
+      .then((result) => setAuthOn(Boolean(result.password)))
       .catch((err: Error) => setError(err.message));
   }, []);
 
@@ -75,6 +88,36 @@ export default function SettingsPage() {
       setAuthMessage(result.authRequired ? "Password protection is on." : "Password protection is off.");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save the password setting");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onOIDC(enabled: boolean) {
+    setBusy(true);
+    setError("");
+    setAuthMessage("");
+    try {
+      const saved = await saveOIDC({ enabled, issuer, clientId, clientSecret });
+      setOidcOn(saved.enabled);
+      setClientSecret("");
+      setAuthMessage(saved.enabled ? "OIDC sign-in is on." : "OIDC sign-in is off.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save OIDC");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onFeatures() {
+    setBusy(true);
+    setError("");
+    try {
+      const saved = await saveFeatures(features);
+      setFeatures(saved);
+      setAuthMessage("Prompt helpers saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save prompt helpers");
     } finally {
       setBusy(false);
     }
@@ -149,6 +192,54 @@ export default function SettingsPage() {
                 </button>
               )}
             </div>
+          </div>
+        </div>
+        <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
+          <p className="text-xs tracking-wide text-gray-500 uppercase">Sign in with OIDC</p>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">
+            Optional. Off by default. The panel asks for a password or this provider only after you turn one of them on. Register this redirect URL with the provider.
+          </p>
+          <p className="mt-2 font-mono text-xs text-gray-800 dark:text-gray-100">{redirectUrl || "—"}</p>
+          <div className="mt-3 grid gap-2 sm:max-w-md">
+            <input value={issuer} onChange={(event) => setIssuer(event.target.value)} placeholder="Issuer URL" className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white" />
+            <input value={clientId} onChange={(event) => setClientId(event.target.value)} placeholder="Client id" className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white" />
+            <input type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} placeholder="Client secret" className="h-10 rounded-lg border border-gray-200 bg-white px-3 text-sm outline-none focus:border-brand-400 dark:border-gray-700 dark:bg-white/5 dark:text-white" />
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => onOIDC(true)} disabled={busy} className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60">
+                {oidcOn ? "Update OIDC" : "Turn on OIDC"}
+              </button>
+              {oidcOn && (
+                <button type="button" onClick={() => onOIDC(false)} disabled={busy} className="rounded-lg border border-gray-200 px-3 py-2 text-sm dark:border-gray-700">
+                  Turn off
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+        <div className="border-t border-gray-100 pt-4 dark:border-gray-800">
+          <p className="text-xs tracking-wide text-gray-500 uppercase">Prompt helpers</p>
+          <p className="mt-1 text-sm text-gray-600 dark:text-gray-300">All off by default. Compression only squeezes extra spaces in text messages. Cache stores non-streaming replies on this computer. Memory sends notes from the Memory page.</p>
+          <div className="mt-3 space-y-2 text-sm text-gray-800 dark:text-gray-100">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={features.compression === "light"} onChange={(event) => setFeatures({ ...features, compression: event.target.checked ? "light" : "off" })} />
+              Light prompt compression
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={features.cache} onChange={(event) => setFeatures({ ...features, cache: event.target.checked })} />
+              Response cache
+            </label>
+            <label className="flex items-center gap-2">
+              Cache for
+              <input type="number" min={30} max={86400} value={features.cacheTtl} onChange={(event) => setFeatures({ ...features, cacheTtl: Number(event.target.value) })} className="h-9 w-28 rounded-lg border border-gray-200 bg-white px-2 dark:border-gray-700 dark:bg-white/5" />
+              seconds
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" checked={features.memory} onChange={(event) => setFeatures({ ...features, memory: event.target.checked })} />
+              Memory notes
+            </label>
+            <button type="button" onClick={onFeatures} disabled={busy} className="rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-60">
+              Save helpers
+            </button>
           </div>
         </div>
         <div className="border-t border-gray-100 pt-4 dark:border-gray-800">

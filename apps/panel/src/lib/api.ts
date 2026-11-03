@@ -271,6 +271,8 @@ export function getUsage() {
 export type PanelSession = {
   authRequired: boolean
   authenticated: boolean
+  password?: boolean
+  oidc?: boolean
 }
 
 export function getSession() {
@@ -302,8 +304,74 @@ export function getClients() {
   return request<{ baseUrl: string; panelUrl: string; clients: ClientSnippet[] }>("/api/clients")
 }
 
+export type Features = {
+  compression: string
+  cache: boolean
+  cacheTtl: number
+  memory: boolean
+}
+
+export type OIDCSettings = {
+  enabled: boolean
+  issuer: string
+  clientId: string
+  hasSecret: boolean
+}
+
 export function getSettings() {
-  return request<{ dataDir: string; address: string; logCount: number }>("/api/settings")
+  return request<{
+    dataDir: string
+    address: string
+    logCount: number
+    features: Features
+    oidc: OIDCSettings
+    redirectUrl: string
+  }>("/api/settings")
+}
+
+export function saveFeatures(body: Features) {
+  return request<Features>("/api/settings/features", { method: "PUT", body: JSON.stringify(body) })
+}
+
+export function saveOIDC(body: { enabled: boolean; issuer: string; clientId: string; clientSecret?: string }) {
+  return request<OIDCSettings & { redirectUrl: string }>("/api/settings/oidc", {
+    method: "PUT",
+    body: JSON.stringify(body),
+  })
+}
+
+export type MemoryNote = { id: string; body: string; createdAt: string }
+
+export function listMemories() {
+  return request<{ memories: MemoryNote[] }>("/api/memories")
+}
+
+export function addMemory(body: string) {
+  return request<MemoryNote>("/api/memories", { method: "POST", body: JSON.stringify({ body }) })
+}
+
+export function deleteMemory(id: string) {
+  return request<void>(`/api/memories/${encodeURIComponent(id)}`, { method: "DELETE" })
+}
+
+export type ClientTarget = { id: string; name: string; path: string; exists: boolean; summary: string }
+
+export function listClientTargets() {
+  return request<{ clients: ClientTarget[] }>("/api/clients/setup")
+}
+
+export function writeClientConfig(client: string, routerKey: string, confirm: boolean) {
+  return request<{ client: string; path: string; backup: string }>("/api/clients/setup", {
+    method: "POST",
+    body: JSON.stringify({ client, routerKey, confirm }),
+  })
+}
+
+export function restoreClientConfig(client: string, confirm: boolean) {
+  return request<{ client: string; path: string; backup: string }>("/api/clients/setup/restore", {
+    method: "POST",
+    body: JSON.stringify({ client, confirm }),
+  })
 }
 
 export function getDesktop() {

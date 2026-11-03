@@ -10,6 +10,12 @@ func (s *Server) clients(w http.ResponseWriter, _ *http.Request) {
 		"panelUrl": base,
 		"clients": []map[string]string{
 			{
+				"id":      "claude",
+				"name":    "Claude Code",
+				"summary": "Claude Code calls /v1/messages. The base URL is the router origin with no /v1 suffix. The router key is the auth token.",
+				"config":  "ANTHROPIC_BASE_URL=" + base + "\nANTHROPIC_AUTH_TOKEN=YOUR_ROUTER_KEY\nModel: auto",
+			},
+			{
 				"id":      "cursor",
 				"name":    "Cursor",
 				"summary": "Override the OpenAI base URL. Paste a router key as the OpenAI API key, then pick a model such as auto or openai/gpt-4o-mini.",

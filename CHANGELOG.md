@@ -4,6 +4,10 @@ Versions follow the `version` field in the root `package.json`. Releases are pub
 
 ## Unreleased
 
+- `POST /v1/messages` and `POST /v1/responses` serve Claude Code and Responses clients. Combos can order by quota when a provider has sent rate-limit headers. Prompt compression, a response cache, and memory notes are off until Settings turns them on.
+- The catalog includes extra OpenAI-compatible providers such as Gemini, Qwen, NVIDIA NIM, and local llama.cpp. Files and small batch jobs, an MCP tool endpoint, and an agent card are available on the same router key.
+- Clients can write Claude Code, OpenCode, and Codex config on this computer after an explicit confirm. Each write keeps a backup and can be restored. OIDC is an optional panel sign-in next to the optional password. Both stay off until you enable them.
+- TLS interception is not included. The router is an endpoint you configure on purpose, and installing a local certificate authority to capture other programs' HTTPS traffic is a poor fit for that.
 - Routing presets `auto`, `auto/cheap`, `auto/fast`, and `auto/coding` pick among chat models that are already turned on. Named combos can use priority, round robin, weighted, cheapest, or least-used order.
 - The panel has a Clients page with copy-paste setup for Cursor, OpenCode, Cline, and scripts. Usage shows the last 14 days. A router key can have an optional monthly USD cap.
 - Successful calls record the route and, on non-streaming responses, send `X-WowRouter-*` cost and model headers.

@@ -23,10 +23,13 @@ func (s *Server) allowPanel(w http.ResponseWriter, r *http.Request) bool {
 	if r.URL.Path == "/api/session" && (r.Method == http.MethodGet || r.Method == http.MethodPost) {
 		return true
 	}
+	if r.URL.Path == "/api/oidc/start" || r.URL.Path == "/api/oidc/callback" {
+		return true
+	}
 	if s.Store == nil {
 		return true
 	}
-	on, err := s.Store.PanelAuthEnabled()
+	on, err := s.Store.PanelLocked()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return false
@@ -47,7 +50,7 @@ func (s *Server) allowPanel(w http.ResponseWriter, r *http.Request) bool {
 }
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
-	on, err := s.panelOn()
+	password, oidcOn, err := s.panelFlags()
 	if err != nil {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -57,7 +60,11 @@ func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
 		writeAPIError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"authRequired": on, "authenticated": !on || ok})
+	locked := password || oidcOn
+	writeJSON(w, http.StatusOK, map[string]any{
+		"authRequired": locked, "password": password, "oidc": oidcOn,
+		"authenticated": !locked || ok,
+	})
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
@@ -158,6 +165,18 @@ func (s *Server) panelOn() (bool, error) {
 		return false, nil
 	}
 	return s.Store.PanelAuthEnabled()
+}
+
+func (s *Server) panelFlags() (password bool, oidcOn bool, err error) {
+	if s.Store == nil {
+		return false, false, nil
+	}
+	password, err = s.Store.PanelAuthEnabled()
+	if err != nil {
+		return false, false, err
+	}
+	oidcOn, err = s.Store.OIDCEnabled()
+	return password, oidcOn, err
 }
 
 func (s *Server) sessionOK(r *http.Request) (bool, error) {

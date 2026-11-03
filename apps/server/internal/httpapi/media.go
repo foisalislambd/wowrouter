@@ -279,6 +279,7 @@ func (s *Server) proxyNativeChat(w http.ResponseWriter, r *http.Request, source,
 		return true
 	}
 	defer resp.Body.Close()
+	s.noteQuota(route, resp.StatusCode, resp.Header)
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 20<<20))
 	if err != nil {
 		if retry {

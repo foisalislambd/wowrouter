@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"strconv"
 	"strings"
+	"time"
 
 	"airoute/server/internal/catalog"
 	"airoute/server/internal/routeplan"
@@ -169,6 +170,17 @@ func (s *Store) comboOrder(id, strategy string, routes []Route, weights []int) (
 		for i, modelID := range ids {
 			counts[i] = usage[modelID]
 		}
+	case routeplan.StrategyFillFirst, routeplan.StrategyHeadroom, routeplan.StrategyResetWindow,
+		routeplan.StrategyQuotaWeighted, routeplan.StrategyQuotaShare:
+		ids := make([]string, n)
+		for i, route := range routes {
+			ids[i] = route.Model.ID
+		}
+		windows, err := s.QuotaWindows(ids, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		return routeplan.OrderWindows(strategy, n, windows, time.Now())
 	}
 	return routeplan.Order(strategy, n, weights, costs, counts, cursor, roll)
 }

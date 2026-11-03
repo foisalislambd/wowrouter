@@ -64,6 +64,24 @@ Streaming responses include the model and strategy headers. Token totals arrive 
 
 A router key can have a monthly USD cap, set when you create it. Spend is estimated from successful calls in the current UTC month. The next call after the cap returns HTTP 429.
 
+Combo strategies also include `fill-first`, `headroom`, `reset-window`, `quota-weighted`, and `quota-share`. Those use rate-limit headers the provider sent on an earlier call. When a provider has not sent any, the combo keeps the saved order.
+
+`X-WowRouter-No-Cache: 1` skips the response cache. `X-WowRouter-No-Memory: 1` skips memory notes. Both features are off until Settings turns them on. Light compression only collapses extra spaces in text message content.
+
+A cached non-streaming reply sets `X-WowRouter-Cache: hit`.
+
+## Messages and Responses
+
+Claude Code calls `POST /v1/messages` on the router origin, with no `/v1` in `ANTHROPIC_BASE_URL`. The router key is `ANTHROPIC_AUTH_TOKEN`. A bare Claude model id is accepted when that upstream id is unique. Other models are translated to and from chat completions, including tool calls. Set `"stream": true` for Anthropic server-sent events.
+
+`POST /v1/messages/count_tokens` returns a local estimate. `POST /v1/responses` accepts a Responses API body and returns a Responses object, which Codex-style clients use.
+
+## Files, batches, MCP, and agent cards
+
+`POST /v1/files` accepts a multipart upload. `POST /v1/batches` runs a JSONL file of at most 40 `/v1/chat/completions` lines on this computer and stores the output as another file. `GET /v1/files/{id}/content` reads a file back.
+
+`POST /mcp` speaks a small JSON-RPC tool surface (`initialize`, `tools/list`, `tools/call`) for `list_models` and `complete_chat`. `GET /.well-known/agent-card.json` and `POST /a2a` expose the same router to an agent client. All of these, except the public agent card, use a router key.
+
 ## Images
 
 ```bash

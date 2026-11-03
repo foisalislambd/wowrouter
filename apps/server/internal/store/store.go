@@ -303,6 +303,51 @@ CREATE TABLE IF NOT EXISTS app_settings (
 CREATE TABLE IF NOT EXISTS panel_sessions (
   token_hash TEXT PRIMARY KEY,
   expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS quota_slots (
+  slot TEXT PRIMARY KEY,
+  remaining INTEGER NOT NULL DEFAULT -1,
+  limit_n INTEGER NOT NULL DEFAULT 0,
+  reset_unix INTEGER NOT NULL DEFAULT 0,
+  cooldown_until INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS quota_hits (
+  slot TEXT NOT NULL,
+  key_id TEXT NOT NULL,
+  bucket INTEGER NOT NULL,
+  hits INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (slot, key_id, bucket)
+);
+CREATE TABLE IF NOT EXISTS response_cache (
+  cache_key TEXT PRIMARY KEY,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memories (
+  id TEXT PRIMARY KEY,
+  body TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS stored_files (
+  id TEXT PRIMARY KEY,
+  filename TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  bytes INTEGER NOT NULL,
+  path TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS batches (
+  id TEXT PRIMARY KEY,
+  input_file_id TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  status TEXT NOT NULL,
+  output_file_id TEXT NOT NULL DEFAULT '',
+  error_file_id TEXT NOT NULL DEFAULT '',
+  request_counts TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  completed_at TEXT NOT NULL DEFAULT ''
 );`); err != nil {
 		return err
 	}

@@ -74,6 +74,16 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.settings)
 	mux.HandleFunc("PUT /api/settings/auth", s.savePanelAuth)
 	mux.HandleFunc("GET /api/clients", s.clients)
+	mux.HandleFunc("GET /api/clients/setup", s.clientSetup)
+	mux.HandleFunc("POST /api/clients/setup", s.clientSetup)
+	mux.HandleFunc("POST /api/clients/setup/restore", s.clientRestore)
+	mux.HandleFunc("GET /api/oidc/start", s.oidcStart)
+	mux.HandleFunc("GET /api/oidc/callback", s.oidcCallback)
+	mux.HandleFunc("PUT /api/settings/oidc", s.saveOIDC)
+	mux.HandleFunc("PUT /api/settings/features", s.saveFeatures)
+	mux.HandleFunc("GET /api/memories", s.listMemories)
+	mux.HandleFunc("POST /api/memories", s.addMemory)
+	mux.HandleFunc("DELETE /api/memories/{id}", s.deleteMemory)
 	mux.HandleFunc("GET /api/desktop", s.getDesktop)
 	mux.HandleFunc("PUT /api/desktop", s.saveDesktop)
 	mux.HandleFunc("GET /api/fallbacks", s.listFallbacks)
@@ -85,6 +95,19 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/models", s.gatewayModels)
 	mux.HandleFunc("POST /v1/models/query", s.queryModels)
 	mux.HandleFunc("POST /v1/chat/completions", s.gatewayChat)
+	mux.HandleFunc("POST /v1/messages", s.gatewayMessages)
+	mux.HandleFunc("POST /v1/messages/count_tokens", s.countTokens)
+	mux.HandleFunc("POST /v1/responses", s.gatewayResponses)
+	mux.HandleFunc("POST /v1/files", s.uploadFile)
+	mux.HandleFunc("GET /v1/files", s.listFiles)
+	mux.HandleFunc("GET /v1/files/{id}/content", s.getFile)
+	mux.HandleFunc("GET /v1/files/{id}", s.getFile)
+	mux.HandleFunc("DELETE /v1/files/{id}", s.deleteFile)
+	mux.HandleFunc("POST /v1/batches", s.createBatch)
+	mux.HandleFunc("GET /v1/batches/{id}", s.getBatch)
+	mux.HandleFunc("POST /mcp", s.mcp)
+	mux.HandleFunc("GET /.well-known/agent-card.json", s.agentCard)
+	mux.HandleFunc("POST /a2a", s.a2a)
 	mux.HandleFunc("POST /v1/systemone", s.gatewayDecision)
 	mux.HandleFunc("POST /v1/images/generations", s.gatewayImages)
 	mux.HandleFunc("POST /v1/videos/generations", s.gatewayVideos)
@@ -497,6 +520,18 @@ func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request, source, keyID
 		return
 	}
 	r = r.WithContext(withDecision(r.Context(), routeDecision{Asked: plan.Asked, Strategy: plan.Strategy}))
+	body = s.decorateChat(r, body)
+	if hit := s.cacheLookup(r, plan.Asked, body); hit != nil {
+		w.Header().Set("X-WowRouter-Cache", "hit")
+		_ = s.addRouteLog(r, store.LogInput{
+			Source: source, RouterKeyID: keyID, ModelID: plan.Asked,
+			StatusCode: http.StatusOK, LatencyMS: int(time.Since(started).Milliseconds()), RouteNote: "response cache",
+		})
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(hit)
+		return
+	}
 	routes, err := s.expandRoutes(plan.Routes)
 	if err != nil {
 		s.failChat(w, source, keyID, meta.Model, http.StatusInternalServerError, "server_error", "internal_error", err.Error(), started)
@@ -594,6 +629,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 		return true
 	}
 	defer resp.Body.Close()
+	s.noteQuota(route, resp.StatusCode, resp.Header)
 	if resp.StatusCode >= 400 && retry {
 		payload, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 		message := upstreamErrorMessage(payload)
@@ -673,6 +709,7 @@ func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, ke
 	if resp.StatusCode < 400 {
 		s.noteAccount(route)
 		stampDecision(w, r, route, prompt, completion)
+		s.rememberCache(r, askedModel(r, route), body, payload, resp.StatusCode, stream)
 	}
 	_ = s.addRouteLog(r, store.LogInput{
 		Source: source, RouterKeyID: keyID, ModelID: route.Model.ID,

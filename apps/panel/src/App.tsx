@@ -8,6 +8,7 @@ import ClientsPage from "@/pages/ClientsPage";
 import FallbackPage from "@/pages/FallbackPage";
 import KeysPage from "@/pages/KeysPage";
 import LoginPage from "@/pages/LoginPage";
+import MemoryPage from "@/pages/MemoryPage";
 import OverviewPage from "@/pages/OverviewPage";
 import PlaygroundPage from "@/pages/PlaygroundPage";
 import ProviderPage from "@/pages/ProviderPage";
@@ -36,6 +37,7 @@ export default function App() {
                 <Route path="/fallback" element={<Navigate to="/routing" replace />} />
                 <Route path="/routing" element={<FallbackPage />} />
                 <Route path="/clients" element={<ClientsPage />} />
+                <Route path="/memory" element={<MemoryPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />

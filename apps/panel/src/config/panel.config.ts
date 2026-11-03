@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { Activity, Boxes, CircleDollarSign, GitBranch, KeyRound, LayoutDashboard, MessagesSquare, Settings, Terminal } from "lucide-react";
+import { Activity, Boxes, Brain, CircleDollarSign, GitBranch, KeyRound, LayoutDashboard, MessagesSquare, Settings, Terminal } from "lucide-react";
 
 export const panelConfig = {
   brand: {
@@ -24,6 +24,7 @@ export const panelNavItems: PanelNavItem[] = [
   { name: "Playground", href: "/playground", icon: MessagesSquare, section: "Access" },
   { name: "Activity", href: "/activity", icon: Activity, section: "Access" },
   { name: "Usage", href: "/usage", icon: CircleDollarSign, section: "Access" },
+  { name: "Memory", href: "/memory", icon: Brain, section: "System" },
   { name: "Settings", href: "/settings", icon: Settings, section: "System" },
 ];
 
