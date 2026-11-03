@@ -142,26 +142,7 @@ func (s *Server) tryChatRoutes(w http.ResponseWriter, r *http.Request, source, k
 			})
 			continue
 		}
-		var done bool
-		switch route.Protocol {
-		case catalog.ProtocolAnthropic, catalog.ProtocolGemini:
-			done = s.proxyNativeChat(w, r, source, keyID, route, body, started, !last)
-		case catalog.ProtocolOllama, catalog.ProtocolCohere, catalog.ProtocolSearch, catalog.ProtocolEmbedding:
-			done = s.proxySpecial(w, r, source, keyID, route, body, started, !last)
-		case catalog.ProtocolOpenAIChat:
-			if route.Model.Kind != "" && route.Model.Kind != catalog.KindChat {
-				s.failChat(w, source, keyID, route.Model.ID, http.StatusBadRequest, "invalid_request_error", "wrong_endpoint", kindEndpointMessage(route.Model.Kind), started)
-				return
-			}
-			done = s.finishOpenAI(w, r, source, keyID, route, body, started, !last)
-		default:
-			if route.Model.Kind == catalog.KindDecision || route.Protocol == catalog.ProtocolSystemOne {
-				s.failChat(w, source, keyID, route.Model.ID, http.StatusBadRequest, "invalid_request_error", "wrong_endpoint", kindEndpointMessage(catalog.KindDecision), started)
-				return
-			}
-			s.failChat(w, source, keyID, route.Model.ID, http.StatusBadRequest, "invalid_request_error", "unsupported_protocol", "This provider protocol is not supported yet.", started)
-			return
-		}
+		done := s.dispatchChat(w, r, source, keyID, route, body, started, !last)
 		if done {
 			return
 		}
@@ -185,12 +166,7 @@ func comboChat(route store.Route) bool {
 	if route.Model.Kind != "" && route.Model.Kind != catalog.KindChat {
 		return false
 	}
-	switch route.Protocol {
-	case catalog.ProtocolOpenAIChat, catalog.ProtocolAnthropic, catalog.ProtocolGemini, catalog.ProtocolOllama, catalog.ProtocolCohere:
-		return true
-	default:
-		return false
-	}
+	return catalog.SupportsChat(route.Protocol) && route.Protocol != catalog.ProtocolComfy
 }
 
 func accountNote(route store.Route, message string) string {

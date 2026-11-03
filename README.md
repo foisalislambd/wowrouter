@@ -40,7 +40,7 @@ The same image is also `foisalislambd/airoute`, `ghcr.io/foisalislambd/wowrouter
 ## First setup
 
 1. Open the panel.
-2. Go to **Providers**, open a provider, paste that provider's API key, and save it.
+2. Go to **Providers**, open a provider, and save its API key. GitHub Enterprise Copilot uses **Sign in with GitHub**. Copilot Web asks for a bearer token. Rows marked Unsupported have no stable API.
 3. Turn on the models you want to call. A model that is off is not offered to clients.
 4. Open **API keys** and create a router key. The secret is shown once and starts with `sk-airoute-`.
 5. In Cursor, or any OpenAI client, set the base URL to `http://127.0.0.1:8787/v1` and the API key to that router key.

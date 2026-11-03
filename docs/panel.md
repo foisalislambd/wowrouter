@@ -30,7 +30,9 @@ If the playground replies, Cursor can use the same model. The [Cursor guide](use
 
 ## Load models
 
-Many providers start with an empty list. **Load models** asks that provider for its current list and saves it.
+Many OpenAI-compatible providers start with an empty list. **Load models** asks that provider for its current list and saves it. Providers with a fixed catalog, including the device-login and session-token ones, do not show that button.
+
+GitHub Enterprise Copilot uses **Sign in with GitHub**. Save the enterprise base URL, enter the OAuth app client id you created, and finish the device code in the browser. Copilot Web asks you to paste only the bearer token from a signed-in request. The page labels that flow unofficial.
 
 Loading replaces the list already stored for that provider. Use it when the page is empty. If the provider already shows the models you want, you can leave the list as it is.
 

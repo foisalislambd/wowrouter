@@ -28,6 +28,8 @@ type Server struct {
 	Stop          func()
 	loginMu       sync.Mutex
 	loginAttempts map[string][]time.Time
+	oauthMu       sync.Mutex
+	oauthPending  map[string]oauthPending
 }
 
 // Store is the persistence surface the HTTP layer needs.
@@ -57,6 +59,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/providers/{slug}/accounts/{id}", s.updateAccount)
 	mux.HandleFunc("DELETE /api/providers/{slug}/accounts/{id}", s.deleteAccount)
 	mux.HandleFunc("POST /api/providers/{slug}/test", s.testProvider)
+	mux.HandleFunc("POST /api/providers/{slug}/oauth/device", s.oauthDevice)
+	mux.HandleFunc("POST /api/providers/{slug}/oauth/poll", s.oauthPoll)
 	mux.HandleFunc("POST /api/providers/{slug}/models/load", s.loadProviderModels)
 	mux.HandleFunc("GET /api/providers/{slug}/models", s.listModels)
 	mux.HandleFunc("PUT /api/providers/{slug}/models/{model...}", s.setModelActive)
@@ -269,6 +273,10 @@ func (s *Server) testProvider(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if protocol != catalog.ProtocolOpenAIChat {
+		if catalog.Adapted(protocol) {
+			s.pingAdapted(w, r, baseURL)
+			return
+		}
 		writeAPIError(w, http.StatusBadRequest, "this provider protocol is not supported yet")
 		return
 	}
@@ -548,28 +556,7 @@ func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request, source, keyID
 		s.failChat(w, source, keyID, route.Model.ID, http.StatusNotFound, "invalid_request_error", "model_not_found", message, started)
 		return
 	}
-	switch route.Protocol {
-	case catalog.ProtocolAnthropic, catalog.ProtocolGemini:
-		s.proxyNativeChat(w, r, source, keyID, route, body, started, false)
-		return
-	case catalog.ProtocolOllama, catalog.ProtocolCohere, catalog.ProtocolSearch, catalog.ProtocolEmbedding:
-		s.proxySpecial(w, r, source, keyID, route, body, started, false)
-		return
-	case catalog.ProtocolOpenAIChat:
-		if route.Model.Kind != "" && route.Model.Kind != catalog.KindChat {
-			s.failChat(w, source, keyID, route.Model.ID, http.StatusBadRequest, "invalid_request_error", "wrong_endpoint", kindEndpointMessage(route.Model.Kind), started)
-			return
-		}
-	default:
-		if route.Model.Kind == catalog.KindDecision || route.Protocol == catalog.ProtocolSystemOne {
-			s.failChat(w, source, keyID, route.Model.ID, http.StatusBadRequest, "invalid_request_error", "wrong_endpoint", kindEndpointMessage(catalog.KindDecision), started)
-			return
-		}
-		s.failChat(w, source, keyID, route.Model.ID, http.StatusBadRequest, "invalid_request_error", "unsupported_protocol", "This provider protocol is not supported yet.", started)
-		return
-	}
-
-	s.finishOpenAI(w, r, source, keyID, route, body, started, false)
+	s.dispatchChat(w, r, source, keyID, route, body, started, false)
 }
 
 func (s *Server) finishOpenAI(w http.ResponseWriter, r *http.Request, source, keyID string, route store.Route, body []byte, started time.Time, retry bool) bool {

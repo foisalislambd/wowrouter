@@ -64,7 +64,36 @@ A wrong base URL shows up as a connection error in **Activity**.
 
 Chat is the path Cursor uses. The other kinds are in the [API](api.md) and [Decisions](decisions.md) guides. If you send a decision model to chat, the router tells you to use `POST /v1/systemone`.
 
-Some providers are listed but marked unsupported. Those rows are there so you can see them. They do not complete a chat call.
+## Protocols that are not plain OpenAI chat
+
+These providers answer `POST /v1/chat/completions`. The router translates the call.
+
+| Provider | What you save | What a chat call does |
+| --- | --- | --- |
+| Inflection, Clarifai, Eden AI, PiAPI, Kong AI Gateway, Inceptron, Codex Cloud | API key, and a base URL when the catalog leaves it blank | OpenAI-compatible chat, including tools and streaming |
+| GitLab Duo | Personal access token. Self-managed instances use `https://gitlab.example.com/api/v4` | Official code-suggestions API |
+| Amazon Bedrock | `accessKeyId:secretAccessKey`, plus `:sessionToken` for temporary credentials | SigV4-signed call to the Bedrock OpenAI runtime. The default region is `us-east-1` |
+| SAP AI Core | The service key JSON, and the deployment chat URL | Client-credentials token, then the deployment |
+| Naver CLOVA Studio | API key | Official v3 chat-completions |
+| Jules, Devin | API key | Creates a cloud coding session and returns its URL or id |
+| ComfyUI | Nothing. The default base URL is `http://127.0.0.1:8188` | Queues a workflow. A JSON message is the graph. Plain text queues a one-node prompt |
+| DuckDuckGo AI Chat | Nothing | Unofficial anonymous chat. DuckDuckGo can change or block it |
+| GitHub Enterprise Copilot | Your own OAuth app client id, then **Sign in with GitHub** | Device flow. The access token is encrypted locally and refreshed when the server sent a refresh token |
+| Microsoft Copilot Web | Only the bearer token from a signed-in `copilot.microsoft.com` request | Unofficial. Do not paste the Cookie header |
+
+The provider page says **Unofficial / experimental** when the contract is not a published API.
+
+## Still unsupported
+
+The rest of the old unsupported list stays unsupported. A pasted cookie or a scraped login does not make them reliable.
+
+- Website tools (SharedChat, FlowGPT, Perchance, Pika, and the other site-only rows) have no public chat API.
+- Web-cookie sites other than Copilot Web (Arena, Poe, v0, Notion, Firefly, and similar) depend on a browser, a captcha, or a private websocket.
+- OAuth rows other than GitHub Enterprise Copilot (xAI, Kiro, Amazon Q, Cursor, Zed, Kimi, and similar) do not publish a third-party client. Kiro's terms also forbid a third-party proxy. PKCE helpers exist in the server for a future public client, and no provider ships a client id.
+- Local CLI bridges (Auggie, Zcode, Codex app server, Devin's local agent) speak a private protocol owned by that binary.
+- Cloudflare Playground needs a browser. Chipotle's endpoint is a support-chat socket. Puter is a client SDK. OpenInference and Perceptron are tracing and middleware, not chat.
+
+Those rows stay in the list with the badge **Unsupported**. Chat returns an error instead of pretending the call succeeded.
 
 ## Routing
 

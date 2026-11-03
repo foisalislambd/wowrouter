@@ -378,6 +378,15 @@ ON CONFLICT(slug) DO UPDATE SET
 			provider.Slug, provider.DisplayName, provider.Protocol, provider.DefaultBaseURL, optional, now); err != nil {
 			return err
 		}
+		var storedBase string
+		if err := tx.QueryRow(`SELECT base_url FROM providers WHERE slug = ?`, provider.Slug).Scan(&storedBase); err != nil {
+			return err
+		}
+		if next, ok := catalog.MigrateBase(provider.Slug, storedBase); ok {
+			if _, err := tx.Exec(`UPDATE providers SET base_url = ? WHERE slug = ?`, next, provider.Slug); err != nil {
+				return err
+			}
+		}
 
 		var fromUpstream int
 		if err := tx.QueryRow(`SELECT models_from_upstream FROM providers WHERE slug = ?`, provider.Slug).Scan(&fromUpstream); err != nil {

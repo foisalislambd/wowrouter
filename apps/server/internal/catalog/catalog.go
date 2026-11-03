@@ -45,6 +45,15 @@ const (
 	ProtocolMedia       = "native_media"
 	ProtocolSDWebUI     = "sdwebui"
 	ProtocolSystemOne   = "systemone"
+	ProtocolGitLab      = "gitlab_duo"
+	ProtocolBedrock     = "bedrock_chat"
+	ProtocolSAP         = "sap_ai_core"
+	ProtocolClova       = "clova_chat"
+	ProtocolCloudAgent  = "cloud_agent"
+	ProtocolComfy       = "comfy_prompt"
+	ProtocolDuck        = "duck_chat"
+	ProtocolOAuthDevice = "oauth_device"
+	ProtocolSession     = "session_token"
 	ProtocolUnsupported = "unsupported"
 	KindChat            = "chat"
 	KindImage           = "image"
@@ -58,7 +67,30 @@ const (
 func All() []Provider {
 	providers := append(append([]Provider{OpenAI()}, generatedProviders()...), decisionProviders()...)
 	providers = append(providers, nocostProviders()...)
-	return mergeExtra(providers)
+	return applySupport(mergeExtra(providers))
+}
+
+// SupportsChat reports protocols the combo and auto ranker can call.
+func SupportsChat(protocol string) bool {
+	switch protocol {
+	case ProtocolOpenAIChat, ProtocolAnthropic, ProtocolGemini, ProtocolOllama, ProtocolCohere,
+		ProtocolGitLab, ProtocolBedrock, ProtocolSAP, ProtocolClova, ProtocolCloudAgent,
+		ProtocolComfy, ProtocolDuck, ProtocolOAuthDevice, ProtocolSession:
+		return true
+	default:
+		return false
+	}
+}
+
+// Adapted reports protocols handled outside the OpenAI chat relay.
+func Adapted(protocol string) bool {
+	switch protocol {
+	case ProtocolGitLab, ProtocolBedrock, ProtocolSAP, ProtocolClova, ProtocolCloudAgent,
+		ProtocolComfy, ProtocolDuck, ProtocolOAuthDevice, ProtocolSession:
+		return true
+	default:
+		return false
+	}
 }
 
 // mergeExtra appends hand-maintained providers. A generated slug always wins,

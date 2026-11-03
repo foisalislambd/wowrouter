@@ -274,9 +274,7 @@ type errString string
 func (e errString) Error() string { return string(e) }
 
 func fallbackStepAllowed(route Route) error {
-	switch route.Protocol {
-	case catalog.ProtocolOpenAIChat, catalog.ProtocolAnthropic, catalog.ProtocolGemini, catalog.ProtocolOllama, catalog.ProtocolCohere:
-	default:
+	if !catalog.SupportsChat(route.Protocol) || route.Protocol == catalog.ProtocolComfy {
 		return errString(route.Model.ID + " is not a chat model this router can call")
 	}
 	if route.Model.Kind != "" && route.Model.Kind != catalog.KindChat {
