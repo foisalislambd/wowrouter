@@ -30,20 +30,30 @@ type Server struct {
 	loginAttempts map[string][]time.Time
 	oauthMu       sync.Mutex
 	oauthPending  map[string]oauthPending
+	started       time.Time
+	consoleMu     sync.Mutex
+	consoleLog    []string
+	rpmMu         sync.Mutex
+	rpmHits       map[string][]time.Time
 }
 
 // Store is the persistence surface the HTTP layer needs.
 type Store = store.Store
 
 func New(db *store.Store, webDir, addr, dataDir string) *Server {
-	return &Server{
+	server := &Server{
 		Store:         db,
 		OpenAI:        openai.NewClient(),
 		WebDir:        webDir,
 		Addr:          addr,
 		DataDir:       dataDir,
 		loginAttempts: map[string][]time.Time{},
+		started:       time.Now(),
 	}
+	if guards, err := db.Guards(); err == nil {
+		_ = server.applyUpstreamProxy(guards.UpstreamProxy)
+	}
+	return server
 }
 
 func (s *Server) Handler() http.Handler {
@@ -115,6 +125,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/systemone", s.gatewayDecision)
 	mux.HandleFunc("POST /v1/images/generations", s.gatewayImages)
 	mux.HandleFunc("POST /v1/videos/generations", s.gatewayVideos)
+	s.parityRoutes(mux)
 	mux.HandleFunc("/", s.spa)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.allowPanel(w, r) {
@@ -525,6 +536,17 @@ func (s *Server) proxyChat(w http.ResponseWriter, r *http.Request, source, keyID
 		return
 	} else if err != nil {
 		s.failChat(w, source, keyID, meta.Model, http.StatusInternalServerError, "server_error", "internal_error", err.Error(), started)
+		return
+	}
+	if err := s.Store.RejectIfTeamBudget(keyID); errors.Is(err, store.ErrTeamBudget) {
+		s.failChat(w, source, keyID, meta.Model, http.StatusTooManyRequests, "insufficient_quota", "budget_exceeded", err.Error(), started)
+		return
+	} else if err != nil {
+		s.failChat(w, source, keyID, meta.Model, http.StatusInternalServerError, "server_error", "internal_error", err.Error(), started)
+		return
+	}
+	if status, message, stop := s.chaosGate(keyID); stop {
+		s.failChat(w, source, keyID, meta.Model, status, "server_error", "chaos", message, started)
 		return
 	}
 	r = r.WithContext(withDecision(r.Context(), routeDecision{Asked: plan.Asked, Strategy: plan.Strategy}))

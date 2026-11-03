@@ -4,6 +4,7 @@ Versions follow the `version` field in the root `package.json`. Releases are pub
 
 ## Unreleased
 
+- The panel now covers the OmniRoute dashboard areas that can run locally: models, quota, endpoints, costs, health, audit, webhooks, batches, cache, compression, evals, skills, agents, and a changelog. The mapping and the skipped items are in `docs/omniroute-parity.md`. TLS interception, an embedded reverse proxy, plugin code, and off-box leaderboards stay out.
 - Seventeen catalog providers that were marked unsupported now complete a chat call. That covers official OpenAI-compatible hosts, GitLab Duo, Bedrock SigV4, SAP AI Core, CLOVA Studio, Jules, Devin, ComfyUI, an unofficial DuckDuckGo chat, GitHub Enterprise device sign-in, and an unofficial Copilot Web token. The rest stay unsupported when there is no stable public contract.
 - `POST /v1/messages` and `POST /v1/responses` serve Claude Code and Responses clients. Combos can order by quota when a provider has sent rate-limit headers. Prompt compression, a response cache, and memory notes are off until Settings turns them on.
 - The catalog includes extra OpenAI-compatible providers such as Gemini, Qwen, NVIDIA NIM, and local llama.cpp. Files and small batch jobs, an MCP tool endpoint, and an agent card are available on the same router key.

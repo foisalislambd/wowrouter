@@ -351,6 +351,9 @@ CREATE TABLE IF NOT EXISTS batches (
 );`); err != nil {
 		return err
 	}
+	if err := s.migrateParity(); err != nil {
+		return err
+	}
 	return s.importLegacyAccounts()
 }
 

@@ -10,6 +10,34 @@ import KeysPage from "@/pages/KeysPage";
 import LoginPage from "@/pages/LoginPage";
 import MemoryPage from "@/pages/MemoryPage";
 import OverviewPage from "@/pages/OverviewPage";
+import {
+  AgentsPage,
+  AuditPage,
+  BatchesPage,
+  CachePage,
+  ChangelogPage,
+  ChaosPage,
+  CompressionPage,
+  ConsolePage,
+  CostsPage,
+  EndpointsPage,
+  EvalsPage,
+  FreePage,
+  HealthPage,
+  LimitsPage,
+  MediaPage,
+  ModelsPage,
+  OnboardingPage,
+  PricingPage,
+  ProxyPage,
+  QuotaPage,
+  SearchPage,
+  ServicesPage,
+  SkillsPage,
+  TeamsPage,
+  TranslatorPage,
+  WebhooksPage,
+} from "@/pages/ParityPages";
 import PlaygroundPage from "@/pages/PlaygroundPage";
 import ProviderPage from "@/pages/ProviderPage";
 import ProvidersPage from "@/pages/ProvidersPage";
@@ -39,6 +67,32 @@ export default function App() {
                 <Route path="/clients" element={<ClientsPage />} />
                 <Route path="/memory" element={<MemoryPage />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/models" element={<ModelsPage />} />
+                <Route path="/quota" element={<QuotaPage />} />
+                <Route path="/endpoints" element={<EndpointsPage />} />
+                <Route path="/translator" element={<TranslatorPage />} />
+                <Route path="/onboarding" element={<OnboardingPage />} />
+                <Route path="/status" element={<HealthPage />} />
+                <Route path="/status/chaos" element={<ChaosPage />} />
+                <Route path="/status/proxy" element={<ProxyPage />} />
+                <Route path="/console" element={<ConsolePage />} />
+                <Route path="/costs" element={<CostsPage />} />
+                <Route path="/costs/pricing" element={<PricingPage />} />
+                <Route path="/costs/free" element={<FreePage />} />
+                <Route path="/costs/teams" element={<TeamsPage />} />
+                <Route path="/limits" element={<LimitsPage />} />
+                <Route path="/webhooks" element={<WebhooksPage />} />
+                <Route path="/batches" element={<BatchesPage />} />
+                <Route path="/cache" element={<CachePage />} />
+                <Route path="/compression" element={<CompressionPage />} />
+                <Route path="/audit" element={<AuditPage />} />
+                <Route path="/search" element={<SearchPage />} />
+                <Route path="/media" element={<MediaPage />} />
+                <Route path="/skills" element={<SkillsPage />} />
+                <Route path="/evals" element={<EvalsPage />} />
+                <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/services" element={<ServicesPage />} />
+                <Route path="/changelog" element={<ChangelogPage />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

@@ -20,8 +20,8 @@ func (s *Server) decorateChat(r *http.Request, body []byte) []byte {
 	if err != nil {
 		return body
 	}
-	if features.Compression == "light" {
-		body = assist.Light(body)
+	if features.Compression != "" && features.Compression != "off" {
+		body = assist.Apply(body, features.Compression)
 	}
 	if features.Memory && !headerOn(r, "X-WowRouter-No-Memory") {
 		note, err := s.Store.MemoryText()

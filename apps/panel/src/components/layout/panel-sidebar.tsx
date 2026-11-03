@@ -1,4 +1,4 @@
-import { panelConfig, panelNavItems, isNavActive } from "@/config/panel.config";
+import { panelConfig, panelNavItems, isNavActive, hiddenNavHrefs } from "@/config/panel.config";
 import { providersListPath } from "@/lib/provider-list-view";
 import {
   SIDEBAR_WIDTH_COLLAPSED,
@@ -6,7 +6,7 @@ import {
   useSidebar,
 } from "@/context/sidebar-context";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 export function PanelSidebar() {
@@ -20,7 +20,13 @@ export function PanelSidebar() {
   const showLabels = !isDesktop || isExpanded || isMobileOpen;
   const desktopWidth = isExpanded ? SIDEBAR_WIDTH_EXPANDED : SIDEBAR_WIDTH_COLLAPSED;
   const mobileClosed = !isDesktop && !isMobileOpen;
-  const sections = groupNav(panelNavItems);
+  const [hidden, setHidden] = useState(() => hiddenNavHrefs());
+  useEffect(() => {
+    const sync = () => setHidden(hiddenNavHrefs());
+    window.addEventListener("wowrouter-nav", sync);
+    return () => window.removeEventListener("wowrouter-nav", sync);
+  }, []);
+  const sections = groupNav(panelNavItems.filter((item) => item.href === "/settings" || !hidden.has(item.href)));
 
   return (
     <aside

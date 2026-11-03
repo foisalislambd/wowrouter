@@ -15,7 +15,11 @@ The panel is the web page at `http://127.0.0.1:8787`. You use it to manage provi
 | Activity | Read one call at a time, including the request that was sent |
 | Usage | See calls grouped by model |
 | Memory | Notes that chat calls can include when memory is on |
-| Settings | Data folder, listen address, optional password or OIDC, and the cache, compression, and memory toggles. On Windows, start with Windows |
+| Models, Quota, Endpoints | Search the catalog, read saved rate limits, and copy the local routes |
+| Costs, Health, Audit | Spend, process health, and MCP or A2A call history |
+| Webhooks, Batches, Limits, Cache, Compression | Outbound hooks, batch files, a per-minute cap, the response cache, and local prompt rewrites |
+| Agents, Skills, Evals, Services | Cloud-agent notes, saved instructions, prompt checks, and bookmarks |
+| Settings | Data folder, listen address, optional password or OIDC, sidebar visibility, and the cache, compression, and memory toggles. On Windows, start with Windows |
 
 ## A normal first visit
 
